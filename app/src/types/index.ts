@@ -82,6 +82,7 @@ export interface PausePayload {
 export interface SeekPayload {
   offsetSeconds: number;
   startedAt: number | null;
+  playbackState?: PlaybackStatus;
 }
 
 export interface SyncPulsePayload {

@@ -140,16 +140,24 @@ export function useSyncEngine(socket: Socket | null, currentSong: Song | null) {
 
     // C. Seek Event
     const handleSeek = async (payload: SeekPayload) => {
-      const activeOffset = clockOffsetRef.current;
-      const { targetPosition } = calculateTargetPosition({
-        startedAt: payload.startedAt,
-        offsetSeconds: payload.offsetSeconds,
-        clockOffset: activeOffset,
-        duration: currentSongRef.current?.duration,
-      });
+      const isPlaying = payload.playbackState === 'playing' || (payload.startedAt !== null && payload.startedAt > 0);
+      if (isPlaying && payload.startedAt) {
+        const activeOffset = clockOffsetRef.current;
+        const { targetPosition } = calculateTargetPosition({
+          startedAt: payload.startedAt,
+          offsetSeconds: payload.offsetSeconds,
+          clockOffset: activeOffset,
+          duration: currentSongRef.current?.duration,
+        });
 
-      console.log(`[SyncEngine] Received Seek event -> Seeking to ${targetPosition.toFixed(2)}s`);
-      await audioEngine.seekTo(targetPosition);
+        console.log(`[SyncEngine] Received Seek event (playing) -> Seeking to ${targetPosition.toFixed(2)}s`);
+        await audioEngine.seekTo(targetPosition);
+        await audioEngine.play();
+      } else {
+        console.log(`[SyncEngine] Received Seek event (paused) -> Seeking to ${payload.offsetSeconds.toFixed(2)}s`);
+        await audioEngine.seekTo(payload.offsetSeconds);
+        await audioEngine.pause();
+      }
     };
 
     // D. 2.5-Second Drift Correction Pulse with Multi-tier Adaptive Phase-Lock Nudging

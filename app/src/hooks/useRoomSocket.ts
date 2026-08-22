@@ -137,6 +137,24 @@ export function useRoomSocket(initialRoom: Room, user: UserSession, onRoomEnded:
       }
     });
 
+    // 2b. Playback State Events (for listeners and room UI synchronization)
+    newSocket.on(SocketEvents.PLAY, (payload: PlayPayload) => {
+      console.log('[Socket] Incoming PLAY event');
+      setPlaybackState('playing');
+    });
+
+    newSocket.on(SocketEvents.PAUSE, (payload: PausePayload) => {
+      console.log('[Socket] Incoming PAUSE event');
+      setPlaybackState('paused');
+    });
+
+    newSocket.on(SocketEvents.SEEK, (payload: SeekPayload) => {
+      console.log('[Socket] Incoming SEEK event to', payload.offsetSeconds, 'state:', payload.playbackState);
+      if (payload.playbackState) {
+        setPlaybackState(payload.playbackState);
+      }
+    });
+
     // 3. Member Count
     newSocket.on(SocketEvents.MEMBER_COUNT, (payload: { count: number }) => {
       setMemberCount(payload.count);

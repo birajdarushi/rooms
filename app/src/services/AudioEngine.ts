@@ -226,15 +226,16 @@ export class AudioEngine {
     const safeSec = Math.max(0, seconds);
 
     if (this.isWeb && this.htmlAudio) {
-      // Only seek if difference is meaningful to prevent decoder pipeline flushes
-      if (Math.abs((this.htmlAudio.currentTime || 0) - safeSec) > 0.08) {
+      if (Math.abs((this.htmlAudio.currentTime || 0) - safeSec) > 0.05) {
         this.htmlAudio.currentTime = safeSec;
       }
+      this.notifyStatus(safeSec);
       return;
     }
 
     if (this.soundObject) {
       await this.soundObject.setPositionAsync(safeSec * 1000);
+      this.notifyStatus(safeSec);
     }
   }
 

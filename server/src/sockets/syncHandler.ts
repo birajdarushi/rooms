@@ -123,19 +123,26 @@ export function registerSyncAndPlaybackHandlers(io: Server, socket: Socket) {
       const offsetSeconds = typeof payload.offsetSeconds === 'number' ? Math.max(0, payload.offsetSeconds) : 0;
       const serverTime = Date.now();
 
-      // ⚡ IMMEDIATE BROADCAST
+      const room = await prisma.room.findUnique({ where: { code: roomCode } });
+      if (!room) return;
+
+      const isPlaying = room.playbackState === 'playing';
+      const startedAt = isPlaying ? serverTime : null;
+
+      // ⚡ IMMEDIATE BROADCAST to all listeners
       const seekBroadcast: SeekPayload = {
         offsetSeconds,
-        startedAt: serverTime,
+        startedAt,
+        playbackState: room.playbackState as any,
       };
       io.to(roomCode).emit(SocketEvents.SEEK, seekBroadcast);
-      console.log(`[Sync] ⚡ Instant Seek broadcast in ${roomCode} to ${offsetSeconds}s`);
+      console.log(`[Sync] ⚡ Instant Seek broadcast in ${roomCode} to ${offsetSeconds}s (playing: ${isPlaying})`);
 
       prisma.room.update({
         where: { code: roomCode },
         data: {
           offsetSeconds,
-          startedAt: BigInt(serverTime),
+          startedAt: startedAt !== null ? BigInt(startedAt) : null,
         },
       }).catch((e) => console.error('[Sync] DB update error on seek:', e));
     } catch (err) {

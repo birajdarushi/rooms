@@ -82,6 +82,7 @@ export interface PausePayload {
 export interface SeekPayload {
   offsetSeconds: number;
   startedAt: number | null; // Server timestamp if currently playing, or null if paused
+  playbackState?: PlaybackStatus;
 }
 
 export interface SyncPulsePayload {
