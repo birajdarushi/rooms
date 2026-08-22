@@ -92,7 +92,7 @@ youtubeRouter.post('/queue', async (req: Request, res: Response) => {
     const result = await youtubeService.downloadAudioTrack({
       roomId,
       url,
-      uploadsDir: config.uploadsDir,
+      uploadsDir: config.storage.localUploadDir,
       customTitle: title,
       customArtist: artist,
     });
