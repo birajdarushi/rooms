@@ -98,7 +98,13 @@ export function useRoomSocket(initialRoom: Room, user: UserSession, onRoomEnded:
       if (payload.currentSong) {
         setCurrentSong(payload.currentSong);
         const isPlaying = payload.playbackState === 'playing';
-        // Load the track but don't auto-play yet — user will press play
+        const targetPos = calculateTargetPosition({
+          startedAt: payload.startedAt,
+          offsetSeconds: payload.offsetSeconds,
+          clockOffset: 0,
+          duration: payload.currentSong.duration,
+        }).targetPosition;
+
         await audioEngine.loadTrack(
           {
             id: payload.currentSong.id,
@@ -108,7 +114,7 @@ export function useRoomSocket(initialRoom: Room, user: UserSession, onRoomEnded:
             duration: payload.currentSong.duration,
           },
           isPlaying,
-          payload.offsetSeconds
+          targetPos
         );
       }
     });
@@ -121,6 +127,13 @@ export function useRoomSocket(initialRoom: Room, user: UserSession, onRoomEnded:
 
       if (payload.currentSong) {
         const isPlaying = payload.playbackState === 'playing';
+        const targetPos = calculateTargetPosition({
+          startedAt: payload.startedAt,
+          offsetSeconds: payload.offsetSeconds,
+          clockOffset: 0,
+          duration: payload.currentSong.duration,
+        }).targetPosition;
+
         await audioEngine.loadTrack(
           {
             id: payload.currentSong.id,
@@ -130,7 +143,7 @@ export function useRoomSocket(initialRoom: Room, user: UserSession, onRoomEnded:
             duration: payload.currentSong.duration,
           },
           isPlaying,
-          payload.offsetSeconds
+          targetPos
         );
       } else {
         await audioEngine.unload();

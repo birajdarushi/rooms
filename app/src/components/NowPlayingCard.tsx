@@ -217,23 +217,6 @@ export const NowPlayingCard: React.FC<Props> = ({
     }
   }, [song, isHost, position, roomCode]);
 
-  // Preload and warm audio buffer whenever a NEW song is selected
-  useEffect(() => {
-    if (song && (!audioEngine.getCurrentTrack() || audioEngine.getCurrentTrack()?.id !== song.id)) {
-      audioEngine.loadTrack(
-        {
-          id: song.id,
-          url: song.storageUrl,
-          title: song.title,
-          artist: song.artist,
-          duration: song.duration,
-        },
-        false, // pre-warm buffers without resetting position or starting playback
-        0
-      ).catch(() => {});
-    }
-  }, [song?.id, song?.storageUrl]);
-
   const notifyListener = () => {
     if (onShowNotice) {
       onShowNotice('🎧 You are a listener in this room. Only the host can control playback.');

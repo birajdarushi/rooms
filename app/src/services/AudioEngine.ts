@@ -127,7 +127,17 @@ export class AudioEngine {
       };
 
       if (initialPosition > 0) {
-        this.htmlAudio!.currentTime = initialPosition;
+        if (this.htmlAudio!.readyState >= 1) {
+          this.htmlAudio!.currentTime = initialPosition;
+        } else {
+          this.htmlAudio!.addEventListener('loadedmetadata', () => {
+            try {
+              if (this.htmlAudio) {
+                this.htmlAudio.currentTime = initialPosition;
+              }
+            } catch (e) {}
+          }, { once: true });
+        }
       }
 
       if (autoPlay) {
@@ -231,8 +241,22 @@ export class AudioEngine {
     const safeSec = Math.max(0, seconds);
 
     if (this.isWeb && this.htmlAudio) {
-      if (Math.abs((this.htmlAudio.currentTime || 0) - safeSec) > 0.04) {
-        this.htmlAudio.currentTime = safeSec;
+      if (this.htmlAudio.readyState >= 1) {
+        if (Math.abs((this.htmlAudio.currentTime || 0) - safeSec) > 0.04) {
+          this.htmlAudio.currentTime = safeSec;
+        }
+      } else {
+        this.htmlAudio.addEventListener(
+          'loadedmetadata',
+          () => {
+            try {
+              if (this.htmlAudio) {
+                this.htmlAudio.currentTime = safeSec;
+              }
+            } catch (e) {}
+          },
+          { once: true }
+        );
       }
       this.notifyStatus(safeSec);
       if (this.isPlaying && this.htmlAudio.paused) {
