@@ -1,0 +1,54 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Room {
+  id            String      @id @default(uuid())
+  code          String      @unique
+  hostId        String
+  status        String      @default("active") // "active" | "grace_period" | "ended"
+  currentSongId String?
+  playbackState String      @default("idle")   // "idle" | "playing" | "paused"
+  startedAt     BigInt?                        // Epoch ms when playback was started
+  offsetSeconds Float       @default(0)        // Offset in seconds
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  songs         Song[]
+  queueItems    QueueItem[]
+}
+
+model Song {
+  id          String      @id @default(uuid())
+  roomId      String
+  uploaderId  String
+  storageUrl  String
+  storageKey  String
+  title       String
+  artist      String
+  duration    Float       @default(0) // Duration in seconds
+  artworkUrl  String?
+  uploadedAt  DateTime    @default(now())
+
+  room        Room        @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  queueItems  QueueItem[]
+}
+
+model QueueItem {
+  id        String   @id @default(uuid())
+  roomId    String
+  songId    String
+  position  Int
+  addedBy   String
+  addedAt   DateTime @default(now())
+
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  song      Song     @relation(fields: [songId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, position])
+}

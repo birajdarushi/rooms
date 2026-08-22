@@ -1,0 +1,476 @@
+import React, { useState, useRef } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+} from 'react-native';
+import { ArrowRight, Settings, Headphones, Radio, Users } from 'lucide-react-native';
+import { api, setApiBaseUrl, getApiBaseUrl } from '../api/client';
+import { Room, UserSession } from '../types';
+import { saveSession } from '../services/SessionStorage';
+import { useAppTheme } from '../context/ThemeContext';
+
+interface Props {
+  onEnterRoom: (room: Room, user: UserSession) => void;
+}
+
+export const HomeScreen: React.FC<Props> = ({ onEnterRoom }) => {
+  const [activeTab, setActiveTab] = useState<'create' | 'join'>('create');
+  const [displayName, setDisplayName] = useState('');
+  const [roomCode, setRoomCode] = useState('');
+  const [digits, setDigits] = useState(['', '', '', '', '']);
+  const [isLoading, setIsLoading] = useState(false);
+  const [showConfig, setShowConfig] = useState(false);
+  const [customServerUrl, setCustomServerUrl] = useState(getApiBaseUrl());
+
+  const { isDark, theme } = useAppTheme();
+  const scrollViewRef = useRef<ScrollView>(null);
+
+  const digitInputRefs = [
+    useRef<TextInput>(null),
+    useRef<TextInput>(null),
+    useRef<TextInput>(null),
+    useRef<TextInput>(null),
+    useRef<TextInput>(null),
+  ];
+
+  // Auto-detect invite link with ?room=CODE or ?join=CODE
+  React.useEffect(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const inviteCode = urlParams.get('room') || urlParams.get('join') || urlParams.get('code');
+        if (inviteCode && inviteCode.trim()) {
+          const clean = inviteCode.trim().toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 5);
+          if (clean.length > 0) {
+            setActiveTab('join');
+            setRoomCode(clean);
+            const chars = clean.split('');
+            const newDigits = ['', '', '', '', ''];
+            chars.forEach((c, idx) => {
+              if (idx < 5) newDigits[idx] = c;
+            });
+            setDigits(newDigits);
+          }
+        }
+      } catch (e) {
+        console.warn('Could not parse invite link:', e);
+      }
+    }
+  }, []);
+
+  const handleInputFocus = () => {
+    setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    }, 200);
+  };
+
+  const handleDigitChange = (val: string, index: number) => {
+    const clean = val.toUpperCase().replace(/[^0-9A-Z]/g, '');
+    const newDigits = [...digits];
+    newDigits[index] = clean.slice(-1);
+    setDigits(newDigits);
+    const fullCode = newDigits.join('');
+    setRoomCode(fullCode);
+
+    if (clean && index < 4) {
+      digitInputRefs[index + 1].current?.focus();
+    }
+  };
+
+  const handleDigitKeyPress = (e: any, index: number) => {
+    if (e.nativeEvent.key === 'Backspace' && !digits[index] && index > 0) {
+      digitInputRefs[index - 1].current?.focus();
+    }
+  };
+
+  const handleCreateRoom = async () => {
+    const name = displayName.trim() || 'Host';
+    try {
+      setIsLoading(true);
+      const res = await api.createRoom(name);
+      setIsLoading(false);
+      await saveSession({
+        token: res.token,
+        userId: res.user.userId,
+        displayName: res.user.displayName,
+        roomId: res.room.id,
+        roomCode: res.room.code,
+        isHost: res.user.isHost,
+        serverUrl: getApiBaseUrl(),
+      });
+      onEnterRoom(res.room, res.user);
+    } catch (err: any) {
+      setIsLoading(false);
+      Alert.alert('Error', err.message || 'Failed to create room.');
+    }
+  };
+
+  const handleJoinRoom = async () => {
+    const code = (roomCode || digits.join('')).trim();
+    if (!code) {
+      Alert.alert('Missing Code', 'Please enter your 5-character room code.');
+      return;
+    }
+    const name = displayName.trim() || 'Listener';
+    try {
+      setIsLoading(true);
+      const res = await api.joinRoom(code, name);
+      setIsLoading(false);
+      await saveSession({
+        token: res.token,
+        userId: res.user.userId,
+        displayName: res.user.displayName,
+        roomId: res.room.id,
+        roomCode: res.room.code,
+        isHost: res.user.isHost,
+        serverUrl: getApiBaseUrl(),
+      });
+      onEnterRoom(res.room, res.user);
+    } catch (err: any) {
+      setIsLoading(false);
+      Alert.alert('Error', err.message || 'Failed to join room.');
+    }
+  };
+
+  const handleSaveServerUrl = () => {
+    if (customServerUrl.trim()) {
+      setApiBaseUrl(customServerUrl.trim());
+      setShowConfig(false);
+      Alert.alert('Updated', `Server URL set to ${customServerUrl.trim()}`);
+    }
+  };
+
+  return (
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 0}
+      style={[styles.container, { backgroundColor: theme.bg }]}
+    >
+      <ScrollView
+        ref={scrollViewRef}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* Top Header */}
+        <View style={styles.topHeaderRow}>
+          <Text style={[styles.brandSubtitle, { color: theme.textPrimary }]}>Midnight Jazz Lounge</Text>
+        </View>
+
+        {/* Bento Main Card */}
+        <View style={[styles.mainCard, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
+          {/* Top Graphic Icon */}
+          <View style={[styles.iconCircle, { backgroundColor: theme.pillBlueBg }]}>
+            <Headphones size={32} color={theme.accent} />
+          </View>
+
+          <Text style={[styles.cardHeading, { color: theme.textPrimary }]}>
+            {activeTab === 'create' ? 'Host a Listening Party' : 'Join a Listening Party'}
+          </Text>
+          <Text style={[styles.cardSubtext, { color: theme.textSecondary }]}>
+            {activeTab === 'create'
+              ? 'Upload tracks, manage queue, and sync audio with friends in real time.'
+              : 'Enter your name and the 5-character code to join the party.'}
+          </Text>
+
+          {/* Segmented Mode Selector */}
+          <View style={[styles.tabContainer, { backgroundColor: theme.elevatedBg }]}>
+            <TouchableOpacity
+              style={[styles.tabButton, activeTab === 'create' && [styles.activeTab, { backgroundColor: theme.cardBg }]]}
+              onPress={() => setActiveTab('create')}
+              activeOpacity={0.8}
+            >
+              <Radio size={16} color={activeTab === 'create' ? theme.accent : theme.textMuted} />
+              <Text style={[styles.tabText, { color: theme.textMuted }, activeTab === 'create' && { color: theme.accent, fontWeight: '700' }]}>
+                Host Room
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.tabButton, activeTab === 'join' && [styles.activeTab, { backgroundColor: theme.cardBg }]]}
+              onPress={() => setActiveTab('join')}
+              activeOpacity={0.8}
+            >
+              <Users size={16} color={activeTab === 'join' ? theme.accent : theme.textMuted} />
+              <Text style={[styles.tabText, { color: theme.textMuted }, activeTab === 'join' && { color: theme.accent, fontWeight: '700' }]}>
+                Join Room
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Form Content */}
+          <View style={styles.formSection}>
+            <View style={styles.formGroup}>
+              <Text style={[styles.inputLabel, { color: theme.textSecondary }]}>Your Display Name</Text>
+              <TextInput
+                style={[styles.input, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder, color: theme.textPrimary }]}
+                placeholder="e.g. Alex"
+                placeholderTextColor={theme.textMuted}
+                value={displayName}
+                onChangeText={setDisplayName}
+                onFocus={handleInputFocus}
+                autoCapitalize="words"
+              />
+            </View>
+
+            {activeTab === 'join' && (
+              <View style={styles.formGroup}>
+                <Text style={[styles.inputLabel, { color: theme.textSecondary }]}>5-Character Room Code</Text>
+                <View style={styles.digitRow}>
+                  {digits.map((digit, idx) => (
+                    <TextInput
+                      key={idx}
+                      ref={digitInputRefs[idx]}
+                      style={[
+                        styles.digitBox,
+                        { backgroundColor: theme.cardBg, borderColor: theme.cardBorder, color: theme.textPrimary },
+                        digit ? { borderColor: theme.accent, backgroundColor: theme.pillBlueBg } : null,
+                      ]}
+                      value={digit}
+                      onChangeText={(val) => handleDigitChange(val, idx)}
+                      onKeyPress={(e) => handleDigitKeyPress(e, idx)}
+                      onFocus={handleInputFocus}
+                      maxLength={1}
+                      autoCapitalize="characters"
+                      placeholder="•"
+                      placeholderTextColor={theme.textMuted}
+                    />
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {/* Action Submit Button */}
+            <TouchableOpacity
+              style={[styles.submitButton, { backgroundColor: theme.accent }]}
+              onPress={activeTab === 'create' ? handleCreateRoom : handleJoinRoom}
+              disabled={isLoading}
+              activeOpacity={0.85}
+            >
+              {isLoading ? (
+                <ActivityIndicator color="#ffffff" />
+              ) : (
+                <View style={styles.submitBtnContent}>
+                  <Text style={styles.submitBtnText}>
+                    {activeTab === 'create' ? 'Create Session' : 'Join Session'}
+                  </Text>
+                  <ArrowRight size={18} color="#ffffff" />
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '100%',
+  },
+  topHeaderRow: {
+    width: '100%',
+    maxWidth: 420,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+    paddingHorizontal: 4,
+  },
+  brandSubtitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+    textAlign: 'center',
+  },
+  themeToggleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+  },
+  themeToggleText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  mainCard: {
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: 28,
+    padding: 24,
+    borderWidth: 1,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.04,
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  iconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  cardHeading: {
+    fontSize: 22,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 6,
+    letterSpacing: -0.3,
+  },
+  cardSubtext: {
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 18,
+    maxWidth: 300,
+  },
+  tabContainer: {
+    flexDirection: 'row',
+    borderRadius: 14,
+    padding: 4,
+    width: '100%',
+    marginBottom: 18,
+  },
+  tabButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 10,
+    gap: 6,
+  },
+  activeTab: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  tabText: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  formSection: {
+    width: '100%',
+  },
+  formGroup: {
+    marginBottom: 14,
+  },
+  inputLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  input: {
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    fontSize: 14,
+  },
+  digitRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 6,
+    width: '100%',
+  },
+  digitBox: {
+    flex: 1,
+    maxWidth: 62,
+    height: 52,
+    borderWidth: 1,
+    borderRadius: 10,
+    textAlign: 'center',
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  submitButton: {
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+    shadowColor: '#0052cc',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  submitBtnContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  submitBtnText: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  serverConfigToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 20,
+    padding: 8,
+  },
+  serverConfigText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  configBox: {
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: 14,
+    padding: 16,
+    marginTop: 10,
+    borderWidth: 1,
+  },
+  configLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  configInput: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 13,
+    marginBottom: 10,
+  },
+  saveConfigBtn: {
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  saveConfigText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+});
