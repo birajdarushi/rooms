@@ -198,8 +198,8 @@ export function useRoomSocket(initialRoom: Room, user: UserSession, onRoomEnded:
           liveAudioStreamer.joinStreamAsListener(initialRoom.id, newSocket);
         } else {
           // Native Android & iOS (Expo Go)
-          const streamUrl = `${getApiBaseUrl()}/api/stream/${initialRoom.id}/live`;
-          console.log(`[Socket] Android Native connecting to live stream: ${streamUrl}`);
+          const streamUrl = `${getApiBaseUrl()}/api/stream/${initialRoom.id}/live.mp3`;
+          console.log(`[Socket] 📱 Android Native connecting to live MP3 stream: ${streamUrl}`);
           await audioEngine.loadTrack(
             {
               id: 'live-stream-' + initialRoom.id,

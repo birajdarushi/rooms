@@ -163,22 +163,35 @@ export class AudioEngine {
 
     // Native Expo Audio Implementation
     try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: true,
+        shouldDuckAndroid: false,
+        playThroughEarpieceAndroid: false,
+      });
+
       if (this.soundObject) {
         await this.soundObject.unloadAsync();
         this.soundObject = null;
       }
 
+      const isLive = normalizedUrl.includes('live');
       const { sound } = await Audio.Sound.createAsync(
         { uri: normalizedUrl },
         {
           shouldPlay: autoPlay,
-          positionMillis: Math.max(0, initialPosition * 1000),
+          positionMillis: isLive ? 0 : Math.max(0, initialPosition * 1000),
           progressUpdateIntervalMillis: 500,
+          volume: 1.0,
         },
         this.onPlaybackStatusUpdate
       );
 
       this.soundObject = sound;
+      if (autoPlay) {
+        await sound.playAsync();
+      }
     } catch (e) {
       console.error('[AudioEngine] Error loading sound:', e);
     }
