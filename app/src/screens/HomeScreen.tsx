@@ -26,6 +26,7 @@ export const HomeScreen: React.FC<Props> = ({ onEnterRoom }) => {
   const [displayName, setDisplayName] = useState('');
   const [roomCode, setRoomCode] = useState('');
   const [digits, setDigits] = useState(['', '', '', '', '']);
+  const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [customServerUrl, setCustomServerUrl] = useState(getApiBaseUrl());
@@ -46,10 +47,11 @@ export const HomeScreen: React.FC<Props> = ({ onEnterRoom }) => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       try {
         const urlParams = new URLSearchParams(window.location.search);
-        const inviteCode = urlParams.get('room') || urlParams.get('join') || urlParams.get('code');
-        if (inviteCode && inviteCode.trim()) {
-          const clean = inviteCode.trim().toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 5);
+        const codeParam = urlParams.get('room') || urlParams.get('join') || urlParams.get('code');
+        if (codeParam && codeParam.trim()) {
+          const clean = codeParam.trim().toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 5);
           if (clean.length > 0) {
+            setInviteCode(clean);
             setActiveTab('join');
             setRoomCode(clean);
             const chars = clean.split('');
@@ -208,6 +210,20 @@ export const HomeScreen: React.FC<Props> = ({ onEnterRoom }) => {
 
           {/* Form Content */}
           <View style={styles.formSection}>
+            {inviteCode && activeTab === 'join' && (
+              <View style={[styles.inviteBanner, { backgroundColor: theme.pillMintBg, borderColor: theme.pillMintText }]}>
+                <Radio size={20} color={theme.pillMintText} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.inviteBannerTitle, { color: theme.pillMintText }]}>
+                    You're invited to Room {inviteCode}!
+                  </Text>
+                  <Text style={[styles.inviteBannerSubtitle, { color: theme.textSecondary }]}>
+                    Enter your name below and join with 1 tap.
+                  </Text>
+                </View>
+              </View>
+            )}
+
             <View style={styles.formGroup}>
               <Text style={[styles.inputLabel, { color: theme.textSecondary }]}>Your Display Name</Text>
               <TextInput
@@ -375,6 +391,24 @@ const styles = StyleSheet.create({
   },
   formSection: {
     width: '100%',
+  },
+  inviteBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  inviteBannerTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  inviteBannerSubtitle: {
+    fontSize: 12,
+    fontWeight: '500',
   },
   formGroup: {
     marginBottom: 14,

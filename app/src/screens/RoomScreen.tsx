@@ -24,6 +24,7 @@ import {
   Plus,
   Check,
   Info,
+  Share2,
 } from 'lucide-react-native';
 import { Room, UserSession, Song, QueueItem } from '../types';
 import { useRoomSocket } from '../hooks/useRoomSocket';
@@ -206,16 +207,28 @@ export const RoomScreen: React.FC<Props> = ({ room, user, onExit }) => {
           <Text style={styles.exitPillText}>{user.isHost ? 'End' : 'Leave'}</Text>
         </TouchableOpacity>
 
-        {/* Center: Room Code Chip */}
-        <TouchableOpacity
-          style={[styles.roomCodeChip, { backgroundColor: theme.pillBlueBg }]}
-          onPress={handleCopyCode}
-          activeOpacity={0.8}
-        >
-          <Text style={[styles.roomCodeLabel, { color: theme.pillBlueText }]}>ROOM</Text>
-          <Text style={[styles.roomCodeValue, { color: theme.pillBlueText }]}>{room.code}</Text>
-          {copied ? <Check size={12} color="#16a34a" /> : <Copy size={12} color={theme.pillBlueText} />}
-        </TouchableOpacity>
+        {/* Center: Room Code Chip & Share Pill */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <TouchableOpacity
+            style={[styles.roomCodeChip, { backgroundColor: theme.pillBlueBg }]}
+            onPress={handleCopyCode}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.roomCodeLabel, { color: theme.pillBlueText }]}>ROOM</Text>
+            <Text style={[styles.roomCodeValue, { color: theme.pillBlueText }]}>{room.code}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.shareInviteChip, { backgroundColor: copied ? 'rgba(22, 163, 74, 0.15)' : theme.pillMintBg }]}
+            onPress={handleCopyCode}
+            activeOpacity={0.8}
+          >
+            {copied ? <Check size={12} color="#16a34a" /> : <Share2 size={12} color={theme.pillMintText} />}
+            <Text style={[styles.shareInviteText, { color: copied ? '#16a34a' : theme.pillMintText }]}>
+              {copied ? 'Copied Link' : 'Share'}
+            </Text>
+          </TouchableOpacity>
+        </View>
 
         {/* Right: Members Count */}
         <TouchableOpacity
@@ -576,6 +589,18 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
     letterSpacing: 1.5,
+  },
+  shareInviteChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+  },
+  shareInviteText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   membersChip: {
     flexDirection: 'row',

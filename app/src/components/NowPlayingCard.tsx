@@ -10,12 +10,15 @@ import {
   Easing,
   Platform,
   useColorScheme,
+  PanResponder,
 } from 'react-native';
 import {
   Play,
   Pause,
   SkipBack,
   SkipForward,
+  RotateCcw,
+  RotateCw,
   Music2,
   Plus,
 } from 'lucide-react-native';
@@ -61,12 +64,22 @@ export const NowPlayingCard: React.FC<Props> = ({
   const [position, setPosition] = useState<number>(0);
   const [duration, setDuration] = useState<number>(song?.duration || 0);
   const [barWidth, setBarWidth] = useState<number>(330);
+  const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [dragPosition, setDragPosition] = useState<number>(0);
+
+  const durationRef = useRef<number>(song?.duration || 0);
+  const barWidthRef = useRef<number>(330);
+  const isDraggingRef = useRef<boolean>(false);
 
   const isDarkMode = useColorScheme() === 'dark';
   const theme = getTheme(isDarkMode);
 
   const isPlaying = playbackState === 'playing';
   const palette = getSongPalette(song ? song.title + song.id : 'default');
+
+  durationRef.current = duration;
+  barWidthRef.current = barWidth;
+  isDraggingRef.current = isDragging;
 
   // Breathing aura animation
   const glowAnim = useRef(new Animated.Value(0.85)).current;
@@ -78,6 +91,39 @@ export const NowPlayingCard: React.FC<Props> = ({
 
   const { width } = useWindowDimensions();
   const isDesktop = width >= 768;
+
+  // PanResponder for smooth VLC/Spotify-style timeline scrubbing
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => isHost && durationRef.current > 0,
+      onMoveShouldSetPanResponder: () => isHost && durationRef.current > 0,
+      onPanResponderGrant: (evt) => {
+        setIsDragging(true);
+        const touchX = Math.max(0, evt.nativeEvent.locationX);
+        const width = barWidthRef.current || 330;
+        const ratio = Math.max(0, Math.min(1, touchX / width));
+        const target = ratio * durationRef.current;
+        setDragPosition(target);
+      },
+      onPanResponderMove: (evt) => {
+        const touchX = Math.max(0, evt.nativeEvent.locationX);
+        const width = barWidthRef.current || 330;
+        const ratio = Math.max(0, Math.min(1, touchX / width));
+        const target = ratio * durationRef.current;
+        setDragPosition(target);
+      },
+      onPanResponderRelease: async (evt) => {
+        setIsDragging(false);
+        const touchX = Math.max(0, evt.nativeEvent.locationX);
+        const width = barWidthRef.current || 330;
+        const ratio = Math.max(0, Math.min(1, touchX / width));
+        const target = ratio * durationRef.current;
+        setPosition(target);
+        await audioEngine.seekTo(target);
+        onSeek(target);
+      },
+    })
+  ).current;
 
   useEffect(() => {
     if (isPlaying) {
@@ -99,11 +145,22 @@ export const NowPlayingCard: React.FC<Props> = ({
       ).start();
 
       // Equalizer bars animation
-      const animateBar = (val: Animated.Value, delay: number, dur: number) => {
+      const animateBar = (anim: Animated.Value, delay: number, dur: number) => {
         Animated.loop(
           Animated.sequence([
-            Animated.timing(val, { toValue: 1, duration: dur, easing: Easing.linear, useNativeDriver: false }),
-            Animated.timing(val, { toValue: 0.3, duration: dur, easing: Easing.linear, useNativeDriver: false }),
+            Animated.timing(anim, {
+              toValue: 1,
+              duration: dur,
+              delay,
+              easing: Easing.inOut(Easing.quad),
+              useNativeDriver: false,
+            }),
+            Animated.timing(anim, {
+              toValue: 0.25,
+              duration: dur,
+              easing: Easing.inOut(Easing.quad),
+              useNativeDriver: false,
+            }),
           ])
         ).start();
       };
@@ -122,11 +179,13 @@ export const NowPlayingCard: React.FC<Props> = ({
 
   useEffect(() => {
     audioEngine.setOnStatusChange((status) => {
-      if (typeof status.position === 'number' && Number.isFinite(status.position)) {
-        setPosition(status.position);
-      }
-      if (typeof status.duration === 'number' && Number.isFinite(status.duration) && status.duration > 0) {
-        setDuration(status.duration);
+      if (!isDraggingRef.current) {
+        if (typeof status.position === 'number' && Number.isFinite(status.position)) {
+          setPosition(status.position);
+        }
+        if (typeof status.duration === 'number' && Number.isFinite(status.duration) && status.duration > 0) {
+          setDuration(status.duration);
+        }
       }
     });
 
@@ -206,35 +265,26 @@ export const NowPlayingCard: React.FC<Props> = ({
     }
   };
 
-  const handleProgressBarPress = (event: any) => {
-    if (!isHost) {
-      notifyListener();
-      return;
-    }
-    if (duration <= 0) return;
-
-    let touchX = 0;
-    if (Platform.OS === 'web' && event?.nativeEvent) {
-      const currentTarget = event.currentTarget || event.target;
-      if (currentTarget && currentTarget.getBoundingClientRect) {
-        const rect = currentTarget.getBoundingClientRect();
-        const clientX = event.nativeEvent.clientX || event.clientX || 0;
-        touchX = Math.max(0, clientX - rect.left);
-      } else {
-        touchX = event.nativeEvent.offsetX ?? event.nativeEvent.locationX ?? 0;
-      }
-    } else {
-      touchX = event?.nativeEvent?.locationX || 0;
-    }
-
-    const currentBarWidth = barWidth > 0 ? barWidth : 330;
-    const ratio = Math.max(0, Math.min(1, touchX / currentBarWidth));
-    const target = ratio * duration;
+  const handleFastForward = async () => {
+    if (!isHost || !song || duration <= 0) return;
+    const current = isDragging ? dragPosition : position;
+    const target = Math.min(duration, current + 10);
     setPosition(target);
+    await audioEngine.seekTo(target);
     onSeek(target);
   };
 
-  const progressPercent = duration > 0 ? (position / duration) * 100 : 0;
+  const handleRewind = async () => {
+    if (!isHost || !song || duration <= 0) return;
+    const current = isDragging ? dragPosition : position;
+    const target = Math.max(0, current - 10);
+    setPosition(target);
+    await audioEngine.seekTo(target);
+    onSeek(target);
+  };
+
+  const currentDisplayPosition = isDragging ? dragPosition : position;
+  const progressPercent = duration > 0 ? (currentDisplayPosition / duration) * 100 : 0;
   const safePercent = Number.isFinite(progressPercent)
     ? Math.min(100, Math.max(0, Math.round(progressPercent)))
     : 0;
@@ -353,14 +403,13 @@ export const NowPlayingCard: React.FC<Props> = ({
         </View>
       </View>
 
-      {/* 3. Progress Scrubber */}
-      <View style={[styles.progressWrap, isDesktop && { marginVertical: 6 }]}>
-        <TouchableOpacity
-          activeOpacity={0.9}
-          style={[styles.progressBar, { backgroundColor: theme.scrubberTrack }]}
-          onPress={handleProgressBarPress}
-          onLayout={(e) => setBarWidth(e.nativeEvent.layout.width)}
-        >
+      {/* 3. Progress Scrubber with Smooth Dragging */}
+      <View
+        style={[styles.progressWrap, isDesktop && { marginVertical: 6 }]}
+        {...(isHost ? panResponder.panHandlers : {})}
+        onLayout={(e) => setBarWidth(e.nativeEvent.layout.width)}
+      >
+        <View style={[styles.progressBar, { backgroundColor: theme.scrubberTrack }]}>
           <View
             style={[
               styles.progressFill,
@@ -375,35 +424,56 @@ export const NowPlayingCard: React.FC<Props> = ({
               style={[
                 styles.progressKnob,
                 {
-                  backgroundColor: theme.textPrimary,
+                  backgroundColor: isDragging ? '#ffffff' : theme.textPrimary,
                   shadowColor: palette.primary,
+                  transform: [{ scale: isDragging ? 1.4 : 1 }],
                 },
               ]}
             />
           </View>
-        </TouchableOpacity>
+        </View>
 
         <View style={[styles.timeRow, isDesktop && { marginTop: 4 }]}>
-          <Text style={[styles.timeLabel, { color: theme.textMuted }, isDesktop && { fontSize: 10 }]}>{formatTime(position)}</Text>
-          <Text style={[styles.timeLabel, { color: theme.textMuted }, isDesktop && { fontSize: 10 }]}>{formatTime(duration)}</Text>
+          <Text style={[styles.timeLabel, { color: isDragging ? palette.primary : theme.textMuted }, isDesktop && { fontSize: 10 }]}>
+            {formatTime(currentDisplayPosition)}
+          </Text>
+          <Text style={[styles.timeLabel, { color: theme.textMuted }, isDesktop && { fontSize: 10 }]}>
+            {formatTime(duration)}
+          </Text>
         </View>
       </View>
 
-      {/* 4. Playback Controls */}
-      <View style={[styles.controlsRow, isDesktop && { marginBottom: 10, gap: 16 }]}>
+      {/* 4. Playback Controls (VLC / Spotify Full Suite: Prev, -10s, Play/Pause, +10s, Next) */}
+      <View style={[styles.controlsRow, isDesktop && { marginBottom: 10, gap: 12 }]}>
+        {/* Previous Song */}
         <TouchableOpacity
           style={[
             styles.ctlBtn,
             { backgroundColor: theme.cardBg, borderColor: theme.cardBorder },
             !song && styles.disabledBtn,
-            isDesktop && { width: 40, height: 40, borderRadius: 20 },
+            isDesktop && { width: 38, height: 38, borderRadius: 19 },
           ]}
           onPress={isHost ? onPrevious : notifyListener}
           activeOpacity={0.75}
         >
-          <SkipBack size={isDesktop ? 18 : 20} color={theme.textSecondary} />
+          <SkipBack size={isDesktop ? 16 : 18} color={theme.textSecondary} />
         </TouchableOpacity>
 
+        {/* Rewind 10 Seconds */}
+        <TouchableOpacity
+          style={[
+            styles.ctlBtn,
+            { backgroundColor: theme.cardBg, borderColor: theme.cardBorder },
+            !song && styles.disabledBtn,
+            isDesktop && { width: 38, height: 38, borderRadius: 19 },
+          ]}
+          onPress={isHost ? handleRewind : notifyListener}
+          activeOpacity={0.75}
+        >
+          <RotateCcw size={isDesktop ? 15 : 17} color={theme.textSecondary} />
+        </TouchableOpacity>
+
+        {/* Big Play / Pause */}
         <TouchableOpacity
           style={[
             styles.playBtn,
@@ -424,17 +494,32 @@ export const NowPlayingCard: React.FC<Props> = ({
           )}
         </TouchableOpacity>
 
+        {/* Forward 10 Seconds */}
         <TouchableOpacity
           style={[
             styles.ctlBtn,
             { backgroundColor: theme.cardBg, borderColor: theme.cardBorder },
             !song && styles.disabledBtn,
-            isDesktop && { width: 40, height: 40, borderRadius: 20 },
+            isDesktop && { width: 38, height: 38, borderRadius: 19 },
+          ]}
+          onPress={isHost ? handleFastForward : notifyListener}
+          activeOpacity={0.75}
+        >
+          <RotateCw size={isDesktop ? 15 : 17} color={theme.textSecondary} />
+        </TouchableOpacity>
+
+        {/* Next Song */}
+        <TouchableOpacity
+          style={[
+            styles.ctlBtn,
+            { backgroundColor: theme.cardBg, borderColor: theme.cardBorder },
+            !song && styles.disabledBtn,
+            isDesktop && { width: 38, height: 38, borderRadius: 19 },
           ]}
           onPress={isHost ? onNext : notifyListener}
           activeOpacity={0.75}
         >
-          <SkipForward size={isDesktop ? 18 : 20} color={theme.textSecondary} />
+          <SkipForward size={isDesktop ? 16 : 18} color={theme.textSecondary} />
         </TouchableOpacity>
       </View>
 
