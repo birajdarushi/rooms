@@ -233,4 +233,43 @@ export enum SocketEvents {
   QUEUE_UPDATED = 'queue:updated',
   REORDER_QUEUE = 'queue:reorder',
   REMOVE_FROM_QUEUE = 'queue:remove',
+
+  // Live System Audio Streaming & WebRTC Signaling
+  STREAM_START = 'stream:start',
+  STREAM_STARTED = 'stream:started',
+  STREAM_STOP = 'stream:stop',
+  STREAM_STOPPED = 'stream:stopped',
+  STREAM_OFFER = 'stream:offer',
+  STREAM_ANSWER = 'stream:answer',
+  STREAM_ICE_CANDIDATE = 'stream:ice-candidate',
+  STREAM_CHUNK = 'stream:chunk',
+}
+
+export interface StreamStartPayload {
+  roomId: string;
+  title?: string;
+}
+
+export interface StreamOfferPayload {
+  roomId: string;
+  targetSocketId: string;
+  sdp: any;
+}
+
+export interface StreamAnswerPayload {
+  roomId: string;
+  targetSocketId: string;
+  sdp: any;
+}
+
+export interface StreamIceCandidatePayload {
+  roomId: string;
+  targetSocketId: string;
+  candidate: any;
+}
+
+export interface StreamChunkPayload {
+  roomId: string;
+  chunk: string; // Base64 or binary chunk
+  timestamp: number;
 }

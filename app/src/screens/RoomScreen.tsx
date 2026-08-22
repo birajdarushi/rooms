@@ -34,6 +34,8 @@ import { PeopleView } from '../components/PeopleView';
 import { SettingsView } from '../components/SettingsView';
 import { UploadModal } from '../components/UploadModal';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { LiveStreamBanner } from '../components/LiveStreamBanner';
+import { liveAudioStreamer } from '../services/LiveAudioStreamer';
 import { api } from '../api/client';
 import { useAppTheme } from '../context/ThemeContext';
 
@@ -108,6 +110,7 @@ export const RoomScreen: React.FC<Props> = ({ room, user, onExit }) => {
   }, []);
 
   const {
+    socket,
     currentSong: socketSong,
     queue: socketQueue,
     memberCount,
@@ -116,6 +119,8 @@ export const RoomScreen: React.FC<Props> = ({ room, user, onExit }) => {
     clockOffset,
     latency,
     driftReport,
+    isLiveStreaming,
+    setIsLiveStreaming,
     emitPlay,
     emitPause,
     emitSeek,
@@ -372,6 +377,16 @@ export const RoomScreen: React.FC<Props> = ({ room, user, onExit }) => {
                 onNavigateToQueue={() => setActiveTab('queue')}
                 onShowNotice={showToast}
               />
+
+              {/* 🔴 Active Live System Audio Loopback Stream Banner */}
+              {isLiveStreaming && (
+                <LiveStreamBanner
+                  isHost={user.isHost}
+                  roomId={room.id}
+                  socket={socket}
+                  onStop={() => setIsLiveStreaming(false)}
+                />
+              )}
             </ScrollView>
           )}
 
@@ -515,6 +530,15 @@ export const RoomScreen: React.FC<Props> = ({ room, user, onExit }) => {
         roomId={room.id}
         onClose={() => setUploadModalVisible(false)}
         onSuccess={() => console.log('Song uploaded & queued')}
+        onStartLiveBroadcast={async () => {
+          try {
+            await liveAudioStreamer.startSystemAudioBroadcast(room.id, socket);
+            setIsLiveStreaming(true);
+            showToast('🎙️ Live System Audio Broadcast is active!');
+          } catch (err: any) {
+            Alert.alert('Broadcast Error', err.message || 'Could not start audio broadcast.');
+          }
+        }}
       />
 
       {/* Custom Boutique Exit Confirmation Modal */}

@@ -11,12 +11,13 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
-import { ArrowRight, Settings, Headphones, Radio, Users, ClipboardPaste } from 'lucide-react-native';
+import { ArrowRight, Settings, Headphones, Radio, Users, ClipboardPaste, Wifi } from 'lucide-react-native';
 import { api, setApiBaseUrl, getApiBaseUrl } from '../api/client';
 import { Room, UserSession } from '../types';
 import { saveSession } from '../services/SessionStorage';
 import { useAppTheme } from '../context/ThemeContext';
 import { LoungeVideoCard } from '../components/LoungeVideoCard';
+import { OfflineHotspotModal } from '../components/OfflineHotspotModal';
 
 interface Props {
   onEnterRoom: (room: Room, user: UserSession) => void;
@@ -30,6 +31,7 @@ export const HomeScreen: React.FC<Props> = ({ onEnterRoom }) => {
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
+  const [showOfflineModal, setShowOfflineModal] = useState(false);
   const [customServerUrl, setCustomServerUrl] = useState(getApiBaseUrl());
 
   const { isDark, theme } = useAppTheme();
@@ -203,10 +205,25 @@ export const HomeScreen: React.FC<Props> = ({ onEnterRoom }) => {
         {/* Top Header */}
         <View style={styles.topHeaderRow}>
           <Text style={[styles.brandSubtitle, { color: theme.textPrimary }]}>Midnight Jazz Lounge</Text>
+          <TouchableOpacity
+            style={[styles.offlineHeaderBtn, { backgroundColor: isDark ? 'rgba(34, 197, 94, 0.15)' : 'rgba(34, 197, 94, 0.1)', borderColor: '#22c55e' }]}
+            onPress={() => setShowOfflineModal(true)}
+            activeOpacity={0.8}
+          >
+            <Wifi size={13} color="#22c55e" />
+            <Text style={styles.offlineHeaderBtnText}>Offline Hotspot</Text>
+          </TouchableOpacity>
         </View>
 
         {/* 🎬 WaveRooms Lounge Video Autoplayer */}
         <LoungeVideoCard />
+
+        {/* Offline Hotspot Modal */}
+        <OfflineHotspotModal
+          visible={showOfflineModal}
+          roomCode={roomCode || 'ROOM'}
+          onClose={() => setShowOfflineModal(false)}
+        />
 
         {/* Bento Main Card */}
         <View style={[styles.mainCard, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
@@ -352,16 +369,30 @@ const styles = StyleSheet.create({
   topHeaderRow: {
     width: '100%',
     maxWidth: 420,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
+    justifyContent: 'space-between',
+    marginBottom: 16,
     paddingHorizontal: 4,
   },
   brandSubtitle: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '800',
     letterSpacing: -0.5,
-    textAlign: 'center',
+  },
+  offlineHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  offlineHeaderBtnText: {
+    color: '#22c55e',
+    fontSize: 11,
+    fontWeight: '700',
   },
   themeToggleBtn: {
     flexDirection: 'row',

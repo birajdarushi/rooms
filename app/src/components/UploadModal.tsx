@@ -35,11 +35,12 @@ interface Props {
   roomId: string;
   onClose: () => void;
   onSuccess: () => void;
+  onStartLiveBroadcast?: () => void;
 }
 
 type DetectedSource = 'spotify' | 'youtube' | 'file' | null;
 
-export const UploadModal: React.FC<Props> = ({ visible, roomId, onClose, onSuccess }) => {
+export const UploadModal: React.FC<Props> = ({ visible, roomId, onClose, onSuccess, onStartLiveBroadcast }) => {
   const { isDark, theme } = useAppTheme();
 
   // Smart Input State
@@ -434,6 +435,39 @@ export const UploadModal: React.FC<Props> = ({ visible, roomId, onClose, onSucce
               )}
             </TouchableOpacity>
 
+            {/* Live System Audio Loopback Broadcast Option */}
+            {Platform.OS === 'web' && onStartLiveBroadcast && (
+              <View style={{ marginBottom: 16 }}>
+                <View style={styles.orDividerRow}>
+                  <View style={[styles.orDividerLine, { backgroundColor: theme.cardBorder }]} />
+                  <Text style={[styles.orDividerText, { color: theme.textMuted }]}>OR STREAM LIVE AUDIO</Text>
+                  <View style={[styles.orDividerLine, { backgroundColor: theme.cardBorder }]} />
+                </View>
+
+                <TouchableOpacity
+                  style={[
+                    styles.liveBroadcastBtn,
+                    { backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.06)', borderColor: '#ef4444' },
+                  ]}
+                  onPress={() => {
+                    onClose();
+                    onStartLiveBroadcast();
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Radio size={20} color="#ef4444" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.liveBroadcastTitle}>
+                      Broadcast Live System Audio
+                    </Text>
+                    <Text style={[styles.liveBroadcastSub, { color: theme.textSecondary }]}>
+                      Stream any audio from Spotify, YouTube, or apps directly
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
+            )}
+
             {/* Processing Step Box */}
             {isProcessing && (
               <View style={[styles.progressBox, { backgroundColor: theme.pillBlueBg }]}>
@@ -714,5 +748,22 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 14,
     fontWeight: '700',
+  },
+  liveBroadcastBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1.5,
+  },
+  liveBroadcastTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#ef4444',
+  },
+  liveBroadcastSub: {
+    fontSize: 11,
+    marginTop: 2,
   },
 });

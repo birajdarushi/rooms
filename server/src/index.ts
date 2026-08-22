@@ -10,6 +10,7 @@ import { youtubeRouter } from './routes/youtube';
 import { spotifyRouter } from './routes/spotify';
 import { registerRoomLifecycle } from './sockets/roomLifecycle';
 import { registerSyncAndPlaybackHandlers, setSocketServer } from './sockets/syncHandler';
+import { registerStreamHandlers } from './sockets/streamHandler';
 import { storageService } from './services/storage';
 import { prisma } from './db/prisma';
 
@@ -65,6 +66,7 @@ io.on('connection', (socket) => {
   // Register handlers
   registerRoomLifecycle(io, socket);
   registerSyncAndPlaybackHandlers(io, socket);
+  registerStreamHandlers(io, socket);
 });
 
 // Fast clean shutdown handlers to prevent EADDRINUSE during hot reloads

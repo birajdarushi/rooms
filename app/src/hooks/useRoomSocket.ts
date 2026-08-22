@@ -25,6 +25,7 @@ export function useRoomSocket(initialRoom: Room, user: UserSession, onRoomEnded:
   const [playbackState, setPlaybackState] = useState<PlaybackStatus>(initialRoom.playbackState);
   const [hostStatus, setHostStatus] = useState<HostStatusPayload>({ isHostConnected: true });
   const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [isLiveStreaming, setIsLiveStreaming] = useState<boolean>(false);
 
   const { clockOffset, latency, isSynced, driftReport, performClockSync } = useSyncEngine(
     socket,
@@ -186,6 +187,26 @@ export function useRoomSocket(initialRoom: Room, user: UserSession, onRoomEnded:
       onRoomEnded(payload.reason);
     });
 
+    // 6. Live Stream Events
+    newSocket.on(SocketEvents.STREAM_STARTED, (payload: any) => {
+      console.log('[Socket] Live System Stream Started:', payload);
+      setIsLiveStreaming(true);
+    });
+
+    newSocket.on(SocketEvents.STREAM_STOPPED, () => {
+      console.log('[Socket] Live System Stream Stopped');
+      setIsLiveStreaming(false);
+    });
+
+    newSocket.on(SocketEvents.STREAM_CHUNK, (payload: any) => {
+      if (!user.isHost && payload.chunk && Platform.OS === 'web') {
+        try {
+          const audio = new Audio(payload.chunk);
+          audio.play().catch(() => {});
+        } catch (e) {}
+      }
+    });
+
     // Notify server when local track finishes
     audioEngine.setOnTrackEnded(() => {
       if (currentSongRef.current) {
@@ -269,6 +290,8 @@ export function useRoomSocket(initialRoom: Room, user: UserSession, onRoomEnded:
     latency,
     isSynced,
     driftReport,
+    isLiveStreaming,
+    setIsLiveStreaming,
     emitPlay,
     emitPause,
     emitSeek,
