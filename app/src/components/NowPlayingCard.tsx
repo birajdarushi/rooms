@@ -25,6 +25,7 @@ import {
 import { Song, PlaybackStatus, QueueItem } from '../types';
 import { audioEngine } from '../services/AudioEngine';
 import { getTheme, getSongPalette, getAvatarColors } from '../constants/theme';
+import { AudioWaveformScrubber } from './AudioWaveformScrubber';
 
 interface Props {
   song: Song | null;
@@ -386,88 +387,19 @@ export const NowPlayingCard: React.FC<Props> = ({
         </View>
       </View>
 
-      {/* 3. Progress Scrubber with Smooth Dragging */}
-      <View
-        style={[styles.progressWrap, isDesktop && { marginVertical: 6 }]}
-        {...(Platform.OS !== 'web' && isHost ? panResponder.panHandlers : {})}
-        onLayout={(e) => setBarWidth(e.nativeEvent.layout.width)}
-      >
-        <View style={[styles.progressBar, { backgroundColor: theme.scrubberTrack, position: 'relative' }]}>
-          <View
-            style={[
-              styles.progressFill,
-              {
-                width: `${safePercent}%`,
-                backgroundColor: palette.primary,
-              },
-            ]}
-          >
-            {/* Scrubber Knob */}
-            <View
-              style={[
-                styles.progressKnob,
-                {
-                  backgroundColor: isDragging ? '#ffffff' : theme.textPrimary,
-                  shadowColor: palette.primary,
-                  transform: [{ scale: isDragging ? 1.4 : 1 }],
-                },
-              ]}
-            />
-          </View>
-
-          {/* Web Native Invisible Overlay Slider for 100% Reliable Dragging & Seeking */}
-          {Platform.OS === 'web' && isHost && (
-            <input
-              type="range"
-              min={0}
-              max={duration > 0 ? duration : 1}
-              step={0.1}
-              value={currentDisplayPosition}
-              onMouseDown={() => setIsDragging(true)}
-              onTouchStart={() => setIsDragging(true)}
-              onChange={(e: any) => {
-                const val = parseFloat(e.target.value);
-                setDragPosition(val);
-              }}
-              onMouseUp={async (e: any) => {
-                const val = parseFloat(e.target.value);
-                setIsDragging(false);
-                setPosition(val);
-                await audioEngine.seekTo(val);
-                onSeek(val);
-              }}
-              onTouchEnd={async (e: any) => {
-                const val = parseFloat(e.target.value);
-                setIsDragging(false);
-                setPosition(val);
-                await audioEngine.seekTo(val);
-                onSeek(val);
-              }}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                height: '100%',
-                opacity: 0,
-                cursor: 'pointer',
-                zIndex: 10,
-                margin: 0,
-                padding: 0,
-              }}
-            />
-          )}
-        </View>
-
-        <View style={[styles.timeRow, isDesktop && { marginTop: 4 }]}>
-          <Text style={[styles.timeLabel, { color: isDragging ? palette.primary : theme.textMuted }, isDesktop && { fontSize: 10 }]}>
-            {formatTime(currentDisplayPosition)}
-          </Text>
-          <Text style={[styles.timeLabel, { color: theme.textMuted }, isDesktop && { fontSize: 10 }]}>
-            {formatTime(duration)}
-          </Text>
-        </View>
-      </View>
+      {/* 3. Real Processed Audio Waveform Scrubber with Blue Playhead Line */}
+      <AudioWaveformScrubber
+        song={song}
+        position={position}
+        duration={duration}
+        isHost={isHost}
+        isPlaying={isPlaying}
+        onSeek={async (targetSec) => {
+          setPosition(targetSec);
+          await audioEngine.seekTo(targetSec);
+          onSeek(targetSec);
+        }}
+      />
 
       {/* 4. Playback Controls (VLC / Spotify Full Suite: Prev, -10s, Play/Pause, +10s, Next) */}
       <View style={[styles.controlsRow, isDesktop && { marginBottom: 10, gap: 12 }]}>

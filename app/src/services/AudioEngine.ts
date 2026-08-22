@@ -106,6 +106,7 @@ export class AudioEngine {
 
       this.htmlAudio!.onended = () => {
         this.isPlaying = false;
+        this.stopProgressTicker();
         this.notifyStatus(0);
         if (this.onTrackEndedCallback) {
           this.onTrackEndedCallback();
@@ -114,12 +115,20 @@ export class AudioEngine {
 
       this.htmlAudio!.onplay = () => {
         this.isPlaying = true;
+        this.startProgressTicker();
         this.notifyStatus(this.htmlAudio?.currentTime || 0);
       };
 
       this.htmlAudio!.onpause = () => {
         this.isPlaying = false;
+        this.stopProgressTicker();
         this.notifyStatus(this.htmlAudio?.currentTime || 0);
+      };
+
+      this.htmlAudio!.ontimeupdate = () => {
+        if (this.isPlaying) {
+          this.notifyStatus(this.htmlAudio?.currentTime || 0);
+        }
       };
 
       this.htmlAudio!.onerror = (err) => {
@@ -144,6 +153,7 @@ export class AudioEngine {
         try {
           await this.htmlAudio!.play();
           this.isPlaying = true;
+          this.startProgressTicker();
         } catch (e) {
           console.warn('[AudioEngine] Autoplay error:', e);
         }
@@ -202,8 +212,28 @@ export class AudioEngine {
     }
   }
 
+  private tickerInterval: any = null;
+
+  private startProgressTicker() {
+    this.stopProgressTicker();
+    this.tickerInterval = setInterval(() => {
+      if (this.isPlaying && this.isWeb && this.htmlAudio) {
+        const current = this.htmlAudio.currentTime || 0;
+        this.notifyStatus(current);
+      }
+    }, 150);
+  }
+
+  private stopProgressTicker() {
+    if (this.tickerInterval) {
+      clearInterval(this.tickerInterval);
+      this.tickerInterval = null;
+    }
+  }
+
   public async play() {
     this.isPlaying = true;
+    this.startProgressTicker();
     if (this.isWeb && this.htmlAudio) {
       try {
         if (this.htmlAudio.paused) {
@@ -222,6 +252,7 @@ export class AudioEngine {
 
   public async pause() {
     this.isPlaying = false;
+    this.stopProgressTicker();
     if (this.isWeb && this.htmlAudio) {
       this.htmlAudio.pause();
       this.notifyStatus(this.htmlAudio.currentTime || 0);
