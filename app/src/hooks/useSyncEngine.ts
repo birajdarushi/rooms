@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Socket } from 'socket.io-client';
 import { audioEngine } from '../services/AudioEngine';
-import { computeMedianClockOffset, calculateTargetPosition, NTPClockSample } from '../utils/syncMath';
+import { computeMedianClockOffset, calculateTargetPosition, PingPongSample } from '../utils/syncMath';
 import {
   Song,
   SocketEvents,
@@ -43,7 +43,7 @@ export function useSyncEngine(socket: Socket | null, currentSong: Song | null) {
     async (activeSocket: Socket): Promise<number> => {
       if (!activeSocket.connected) return 0;
 
-      const samples: NTPClockSample[] = [];
+      const samples: PingPongSample[] = [];
       const TOTAL_SAMPLES = 5;
 
       for (let i = 0; i < TOTAL_SAMPLES; i++) {
@@ -58,10 +58,9 @@ export function useSyncEngine(socket: Socket | null, currentSong: Song | null) {
             activeSocket.off(SocketEvents.PONG, handlePong);
 
             resolve({
-              t0: pong.clientSentAt,
-              t1: pong.serverTime,
-              t2: pong.serverTime,
-              t3,
+              clientSentAt: Number(pong.clientSentAt) || t0,
+              serverTime: Number(pong.serverTime) || Date.now(),
+              clientReceivedAt: t3,
             });
           };
 
