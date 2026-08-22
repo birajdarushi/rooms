@@ -8,6 +8,7 @@ import { roomsRouter } from './routes/rooms';
 import { storageRouter } from './routes/storage';
 import { youtubeRouter } from './routes/youtube';
 import { spotifyRouter } from './routes/spotify';
+import { streamRouter } from './routes/stream';
 import { registerRoomLifecycle } from './sockets/roomLifecycle';
 import { registerSyncAndPlaybackHandlers, setSocketServer } from './sockets/syncHandler';
 import { registerStreamHandlers } from './sockets/streamHandler';
@@ -47,6 +48,7 @@ app.use('/api/rooms', roomsRouter);
 app.use('/api/storage', storageRouter);
 app.use('/api/youtube', youtubeRouter);
 app.use('/api/spotify', spotifyRouter);
+app.use('/api/stream', streamRouter);
 
 // Initialize Socket.io Server
 const io = new SocketIOServer(server, {

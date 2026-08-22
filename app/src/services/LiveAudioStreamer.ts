@@ -18,6 +18,7 @@ export class LiveAudioStreamer {
 
   // Host PeerConnections to each listener
   private hostPeerConnections: Map<string, RTCPeerConnection> = new Map();
+  private mediaRecorder: any = null;
 
   // Listener PeerConnection to the host
   private listenerPeerConnection: RTCPeerConnection | null = null;
@@ -77,13 +78,47 @@ export class LiveAudioStreamer {
       // Bind Host WebRTC socket signaling
       this.bindHostSocketSignaling(roomId, socket, stream);
 
+      // Start continuous media chunk recording for HTTP stream relay (supports Android native & Web)
+      try {
+        if (typeof MediaRecorder !== 'undefined') {
+          const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+            ? 'audio/webm;codecs=opus'
+            : (MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4');
+
+          const recorder = new MediaRecorder(new MediaStream(audioTracks), {
+            mimeType,
+            audioBitsPerSecond: 128000,
+          });
+
+          recorder.ondataavailable = (e) => {
+            if (e.data && e.data.size > 0 && this.isBroadcasting) {
+              const reader = new FileReader();
+              reader.onloadend = () => {
+                const base64 = reader.result as string;
+                socket.emit(SocketEvents.STREAM_CHUNK, {
+                  roomId,
+                  chunk: base64,
+                  timestamp: Date.now(),
+                });
+              };
+              reader.readAsDataURL(e.data);
+            }
+          };
+
+          recorder.start(250);
+          this.mediaRecorder = recorder;
+        }
+      } catch (recErr) {
+        console.warn('[LiveAudioStreamer] MediaRecorder init error:', recErr);
+      }
+
       // Notify room server that live broadcast started
       socket.emit(SocketEvents.STREAM_START, {
         roomId,
         title: 'Live System Audio Broadcast',
       });
 
-      console.log('[LiveAudioStreamer] 🎙️ Live System Audio Broadcast active with WebRTC multi-peer mesh!');
+      console.log('[LiveAudioStreamer] 🎙️ Live System Audio Broadcast active with WebRTC + HTTP stream relay!');
       return true;
     } catch (err: any) {
       console.error('[LiveAudioStreamer] Error capturing audio:', err);

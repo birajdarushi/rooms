@@ -1,6 +1,7 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { SocketEvents, StreamStartPayload, StreamOfferPayload, StreamAnswerPayload, StreamIceCandidatePayload, StreamChunkPayload } from '../../../shared';
 import { prisma } from '../db/prisma';
+import { broadcastAudioChunk, clearRoomStream } from '../routes/stream';
 
 interface ActiveLiveStream {
   roomId: string;
@@ -117,12 +118,23 @@ export function registerStreamHandlers(io: SocketIOServer, socket: Socket) {
   });
 
   /**
-   * 6. Fallback Binary Audio Chunk Broadcast
+   * 6. Binary Audio Chunk Broadcast (Relayed to HTTP stream and socket listeners)
    */
   socket.on(SocketEvents.STREAM_CHUNK, async (payload: StreamChunkPayload) => {
     const { roomId, chunk, timestamp } = payload;
     const stream = activeLiveStreams.get(roomId);
-    if (stream) {
+    if (stream && chunk) {
+      try {
+        let buf: Buffer;
+        if (typeof chunk === 'string') {
+          const base64Data = chunk.replace(/^data:audio\/\w+;base64,/, '');
+          buf = Buffer.from(base64Data, 'base64');
+        } else {
+          buf = Buffer.from(chunk);
+        }
+        broadcastAudioChunk(roomId, buf);
+      } catch (e) {}
+
       socket.to(stream.roomCode).emit(SocketEvents.STREAM_CHUNK, {
         roomId,
         chunk,
@@ -141,6 +153,7 @@ export function registerStreamHandlers(io: SocketIOServer, socket: Socket) {
       if (stream) {
         activeLiveStreams.delete(roomId);
         activeLiveStreams.delete(stream.roomCode);
+        clearRoomStream(roomId);
         console.log(`[StreamHandler] 🛑 Live Audio Broadcast stopped in room ${stream.roomCode}`);
         io.to(stream.roomCode).emit(SocketEvents.STREAM_STOPPED, { roomId });
       }

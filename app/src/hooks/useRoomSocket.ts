@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { Platform } from 'react-native';
 import { io, Socket } from 'socket.io-client';
 import { getApiBaseUrl } from '../api/client';
 import { audioEngine } from '../services/AudioEngine';
@@ -189,19 +190,40 @@ export function useRoomSocket(initialRoom: Room, user: UserSession, onRoomEnded:
     });
 
     // 6. Live Stream Events
-    newSocket.on(SocketEvents.STREAM_STARTED, (payload: any) => {
+    newSocket.on(SocketEvents.STREAM_STARTED, async (payload: any) => {
       console.log('[Socket] Live System Stream Started:', payload);
       setIsLiveStreaming(true);
       if (!user.isHost) {
-        liveAudioStreamer.joinStreamAsListener(initialRoom.id, newSocket);
+        if (Platform.OS === 'web') {
+          liveAudioStreamer.joinStreamAsListener(initialRoom.id, newSocket);
+        } else {
+          // Native Android & iOS (Expo Go)
+          const streamUrl = `${getApiBaseUrl()}/api/stream/${initialRoom.id}/live`;
+          console.log(`[Socket] Android Native connecting to live stream: ${streamUrl}`);
+          await audioEngine.loadTrack(
+            {
+              id: 'live-stream-' + initialRoom.id,
+              url: streamUrl,
+              title: 'Live System Audio Broadcast',
+              artist: 'Streaming from Host',
+              duration: 0,
+            },
+            true,
+            0
+          );
+        }
       }
     });
 
-    newSocket.on(SocketEvents.STREAM_STOPPED, () => {
+    newSocket.on(SocketEvents.STREAM_STOPPED, async () => {
       console.log('[Socket] Live System Stream Stopped');
       setIsLiveStreaming(false);
       if (!user.isHost) {
-        liveAudioStreamer.stopBroadcast(initialRoom.id, newSocket);
+        if (Platform.OS === 'web') {
+          liveAudioStreamer.stopBroadcast(initialRoom.id, newSocket);
+        } else {
+          await audioEngine.unload();
+        }
       }
     });
 
