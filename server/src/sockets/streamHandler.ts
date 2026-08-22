@@ -39,12 +39,14 @@ export function registerStreamHandlers(io: SocketIOServer, socket: Socket) {
       };
 
       activeLiveStreams.set(roomId, streamInfo);
+      activeLiveStreams.set(room.code, streamInfo);
 
-      console.log(`[StreamHandler] 🎙️ Live Audio Broadcast started in room ${room.code} by socket ${socket.id}`);
+      console.log(`[StreamHandler] 🎙️ Live Audio Broadcast started in room ${room.code} by host socket ${socket.id}`);
 
       // Broadcast to all room members that live stream is active
       io.to(room.code).emit(SocketEvents.STREAM_STARTED, {
         roomId,
+        roomCode: room.code,
         broadcasterSocketId: socket.id,
         title,
         startedAt: streamInfo.startedAt,
@@ -55,11 +57,28 @@ export function registerStreamHandlers(io: SocketIOServer, socket: Socket) {
   });
 
   /**
-   * 2. Host Sends WebRTC SDP Offer to a specific listener
+   * 2. Listener Requests to Join Live Audio Stream (Triggers WebRTC Handshake)
+   */
+  socket.on(SocketEvents.STREAM_JOIN, (payload: { roomId: string; roomCode?: string }) => {
+    const { roomId, roomCode } = payload;
+    const stream = (roomId && activeLiveStreams.get(roomId)) || (roomCode && activeLiveStreams.get(roomCode));
+    if (stream) {
+      console.log(`[StreamHandler] 🎧 Listener ${socket.id} joined live stream in ${stream.roomCode}. Requesting SDP Offer from host ${stream.broadcasterSocketId}`);
+      io.to(stream.broadcasterSocketId).emit(SocketEvents.STREAM_LISTENER_JOINED, {
+        roomId: stream.roomId,
+        roomCode: stream.roomCode,
+        listenerSocketId: socket.id,
+      });
+    }
+  });
+
+  /**
+   * 3. Host Sends WebRTC SDP Offer to a specific listener
    */
   socket.on(SocketEvents.STREAM_OFFER, (payload: StreamOfferPayload) => {
     const { targetSocketId, sdp, roomId } = payload;
     if (targetSocketId && sdp) {
+      console.log(`[StreamHandler] 📡 Relaying SDP Offer from host ${socket.id} to listener ${targetSocketId}`);
       io.to(targetSocketId).emit(SocketEvents.STREAM_OFFER, {
         roomId,
         broadcasterSocketId: socket.id,
@@ -69,11 +88,12 @@ export function registerStreamHandlers(io: SocketIOServer, socket: Socket) {
   });
 
   /**
-   * 3. Listener Sends WebRTC SDP Answer back to Host
+   * 4. Listener Sends WebRTC SDP Answer back to Host
    */
   socket.on(SocketEvents.STREAM_ANSWER, (payload: StreamAnswerPayload) => {
     const { targetSocketId, sdp, roomId } = payload;
     if (targetSocketId && sdp) {
+      console.log(`[StreamHandler] 📡 Relaying SDP Answer from listener ${socket.id} to host ${targetSocketId}`);
       io.to(targetSocketId).emit(SocketEvents.STREAM_ANSWER, {
         roomId,
         listenerSocketId: socket.id,
@@ -83,7 +103,7 @@ export function registerStreamHandlers(io: SocketIOServer, socket: Socket) {
   });
 
   /**
-   * 4. ICE Candidate exchange between Host and Listener
+   * 5. ICE Candidate exchange between Host and Listener
    */
   socket.on(SocketEvents.STREAM_ICE_CANDIDATE, (payload: StreamIceCandidatePayload) => {
     const { targetSocketId, candidate, roomId } = payload;
@@ -97,13 +117,12 @@ export function registerStreamHandlers(io: SocketIOServer, socket: Socket) {
   });
 
   /**
-   * 5. Fallback Binary Audio Chunk Broadcast (for devices without P2P WebRTC)
+   * 6. Fallback Binary Audio Chunk Broadcast
    */
   socket.on(SocketEvents.STREAM_CHUNK, async (payload: StreamChunkPayload) => {
     const { roomId, chunk, timestamp } = payload;
     const stream = activeLiveStreams.get(roomId);
     if (stream) {
-      // Relay audio chunk to all other listeners in the room
       socket.to(stream.roomCode).emit(SocketEvents.STREAM_CHUNK, {
         roomId,
         chunk,
@@ -113,7 +132,7 @@ export function registerStreamHandlers(io: SocketIOServer, socket: Socket) {
   });
 
   /**
-   * 6. Host Stops Live Audio Broadcast
+   * 7. Host Stops Live Audio Broadcast
    */
   socket.on(SocketEvents.STREAM_STOP, async (payload: { roomId: string }) => {
     try {
@@ -121,6 +140,7 @@ export function registerStreamHandlers(io: SocketIOServer, socket: Socket) {
       const stream = activeLiveStreams.get(roomId);
       if (stream) {
         activeLiveStreams.delete(roomId);
+        activeLiveStreams.delete(stream.roomCode);
         console.log(`[StreamHandler] 🛑 Live Audio Broadcast stopped in room ${stream.roomCode}`);
         io.to(stream.roomCode).emit(SocketEvents.STREAM_STOPPED, { roomId });
       }
@@ -130,12 +150,13 @@ export function registerStreamHandlers(io: SocketIOServer, socket: Socket) {
   });
 
   /**
-   * 7. Clean up stream if broadcaster disconnects
+   * 8. Clean up stream if broadcaster disconnects
    */
   socket.on('disconnect', () => {
     for (const [roomId, stream] of activeLiveStreams.entries()) {
       if (stream.broadcasterSocketId === socket.id) {
         activeLiveStreams.delete(roomId);
+        activeLiveStreams.delete(stream.roomCode);
         console.log(`[StreamHandler] Broadcaster disconnected. Ended stream in ${stream.roomCode}`);
         io.to(stream.roomCode).emit(SocketEvents.STREAM_STOPPED, { roomId });
       }

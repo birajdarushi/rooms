@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { getApiBaseUrl } from '../api/client';
 import { audioEngine } from '../services/AudioEngine';
+import { liveAudioStreamer } from '../services/LiveAudioStreamer';
 import { useSyncEngine } from './useSyncEngine';
 import { calculateTargetPosition } from '../utils/syncMath';
 import {
@@ -191,19 +192,16 @@ export function useRoomSocket(initialRoom: Room, user: UserSession, onRoomEnded:
     newSocket.on(SocketEvents.STREAM_STARTED, (payload: any) => {
       console.log('[Socket] Live System Stream Started:', payload);
       setIsLiveStreaming(true);
+      if (!user.isHost) {
+        liveAudioStreamer.joinStreamAsListener(initialRoom.id, newSocket);
+      }
     });
 
     newSocket.on(SocketEvents.STREAM_STOPPED, () => {
       console.log('[Socket] Live System Stream Stopped');
       setIsLiveStreaming(false);
-    });
-
-    newSocket.on(SocketEvents.STREAM_CHUNK, (payload: any) => {
-      if (!user.isHost && payload.chunk && Platform.OS === 'web') {
-        try {
-          const audio = new Audio(payload.chunk);
-          audio.play().catch(() => {});
-        } catch (e) {}
+      if (!user.isHost) {
+        liveAudioStreamer.stopBroadcast(initialRoom.id, newSocket);
       }
     });
 

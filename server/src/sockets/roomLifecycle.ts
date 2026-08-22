@@ -1,6 +1,7 @@
 import { Server, Socket } from 'socket.io';
 import { prisma, formatSong, formatQueueItem } from '../db/prisma';
 import { storageService } from '../services/storage';
+import { getActiveLiveStream } from './streamHandler';
 import { SocketEvents, HostStatusPayload, RoomEndedPayload } from '../../../shared';
 
 interface RoomSessionState {
@@ -127,6 +128,18 @@ export function registerRoomLifecycle(io: Server, socket: Socket) {
           startedAt: room.startedAt ? Number(room.startedAt) : null,
           offsetSeconds: room.offsetSeconds,
         });
+
+        // If an active live stream is already running in this room, notify late joiner
+        const activeStream = getActiveLiveStream(room.id) || getActiveLiveStream(normalizedCode);
+        if (activeStream) {
+          socket.emit(SocketEvents.STREAM_STARTED, {
+            roomId: activeStream.roomId,
+            roomCode: activeStream.roomCode,
+            broadcasterSocketId: activeStream.broadcasterSocketId,
+            title: activeStream.title,
+            startedAt: activeStream.startedAt,
+          });
+        }
 
         console.log(
           `[Lifecycle] User ${displayName} (${userId}) joined room ${normalizedCode}. Members: ${session.connectedMembers.size}. Sent state sync (queue: ${room.queueItems.length} songs).`

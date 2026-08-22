@@ -1,13 +1,27 @@
 import { Platform } from 'react-native';
-import { SocketEvents, StreamStartPayload, StreamChunkPayload } from '../types';
+import { SocketEvents, StreamStartPayload } from '../types';
+
+const RTC_CONFIG: RTCConfiguration = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+  ],
+};
 
 export class LiveAudioStreamer {
   private static instance: LiveAudioStreamer;
   private mediaStream: MediaStream | null = null;
   private audioContext: AudioContext | null = null;
   private isBroadcasting: boolean = false;
+  private isListeningToStream: boolean = false;
   private volumeCallback: ((level: number) => void) | null = null;
-  private mediaRecorder: MediaRecorder | null = null;
+
+  // Host PeerConnections to each listener
+  private hostPeerConnections: Map<string, RTCPeerConnection> = new Map();
+
+  // Listener PeerConnection to the host
+  private listenerPeerConnection: RTCPeerConnection | null = null;
+  private listenerAudioElement: HTMLAudioElement | null = null;
 
   public static getInstance(): LiveAudioStreamer {
     if (!LiveAudioStreamer.instance) {
@@ -21,35 +35,36 @@ export class LiveAudioStreamer {
   }
 
   /**
-   * 1. Start capturing live system/tab audio from the browser
+   * 1. HOST: Start capturing live system/tab audio and setup WebRTC broadcaster
    */
   public async startSystemAudioBroadcast(roomId: string, socket: any): Promise<boolean> {
     if (Platform.OS !== 'web' || typeof navigator === 'undefined' || !navigator.mediaDevices?.getDisplayMedia) {
-      throw new Error('System audio capture is only supported on Web browsers (Chrome, Edge, Brave, Opera).');
+      throw new Error('System audio capture is supported on desktop web browsers (Chrome, Edge, Brave, Opera).');
     }
 
     try {
-      // Prompt user to capture screen with system audio
+      // Capture system audio / tab audio
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
         audio: {
           echoCancellation: false,
           noiseSuppression: false,
           autoGainControl: false,
+          channelCount: 2,
         } as any,
       });
 
       const audioTracks = stream.getAudioTracks();
       if (!audioTracks || audioTracks.length === 0) {
-        // User didn't check 'Share audio'
         stream.getTracks().forEach((t) => t.stop());
-        throw new Error('No audio track detected. Please make sure to check "Also share audio" in the popup.');
+        throw new Error('No audio track detected. Please make sure to check "Also share audio" in the browser popup.');
       }
 
       this.mediaStream = stream;
       this.isBroadcasting = true;
+      this.hostPeerConnections.clear();
 
-      // Handle user clicking "Stop Sharing" on browser banner
+      // When host stops screen sharing in browser UI
       stream.getVideoTracks().forEach((track) => {
         track.onended = () => {
           this.stopBroadcast(roomId, socket);
@@ -57,70 +72,18 @@ export class LiveAudioStreamer {
       });
 
       // Initialize Web Audio Analyzer for Live VU Meter
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (AudioCtx) {
-        this.audioContext = new AudioCtx();
-        const source = this.audioContext.createMediaStreamSource(stream);
-        const analyser = this.audioContext.createAnalyser();
-        analyser.fftSize = 64;
-        source.connect(analyser);
+      this.initAudioAnalyzer(stream);
 
-        const dataArray = new Uint8Array(analyser.frequencyBinCount);
-        const checkLevel = () => {
-          if (!this.isBroadcasting) return;
-          analyser.getByteFrequencyData(dataArray);
-          let sum = 0;
-          for (let i = 0; i < dataArray.length; i++) {
-            sum += dataArray[i];
-          }
-          const avg = sum / dataArray.length;
-          const level = Math.min(1.0, avg / 128);
-          if (this.volumeCallback) {
-            this.volumeCallback(level);
-          }
-          requestAnimationFrame(checkLevel);
-        };
-        requestAnimationFrame(checkLevel);
-      }
+      // Bind Host WebRTC socket signaling
+      this.bindHostSocketSignaling(roomId, socket, stream);
 
-      // Notify server that stream started
+      // Notify room server that live broadcast started
       socket.emit(SocketEvents.STREAM_START, {
         roomId,
         title: 'Live System Audio Broadcast',
       });
 
-      // Stream audio chunks via MediaRecorder for low-latency chunk relay
-      if (typeof MediaRecorder !== 'undefined') {
-        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-          ? 'audio/webm;codecs=opus'
-          : 'audio/webm';
-
-        const audioOnlyStream = new MediaStream(audioTracks);
-        this.mediaRecorder = new MediaRecorder(audioOnlyStream, {
-          mimeType,
-          audioBitsPerSecond: 128000,
-        });
-
-        this.mediaRecorder.ondataavailable = async (e) => {
-          if (e.data && e.data.size > 0 && this.isBroadcasting) {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-              const base64data = reader.result as string;
-              socket.emit(SocketEvents.STREAM_CHUNK, {
-                roomId,
-                chunk: base64data,
-                timestamp: Date.now(),
-              });
-            };
-            reader.readAsDataURL(e.data);
-          }
-        };
-
-        // Emit slice every 250ms for low-latency transmission
-        this.mediaRecorder.start(250);
-      }
-
-      console.log('[LiveAudioStreamer] 🎙️ Live System Audio Broadcast started!');
+      console.log('[LiveAudioStreamer] 🎙️ Live System Audio Broadcast active with WebRTC multi-peer mesh!');
       return true;
     } catch (err: any) {
       console.error('[LiveAudioStreamer] Error capturing audio:', err);
@@ -130,14 +93,248 @@ export class LiveAudioStreamer {
   }
 
   /**
-   * 2. Stop Live Audio Broadcast
+   * Bind Host WebRTC Signaling (creates offer whenever a listener joins)
+   */
+  private bindHostSocketSignaling(roomId: string, socket: any, stream: MediaStream) {
+    // When a listener joins the live stream, host creates an offer for them
+    socket.off(SocketEvents.STREAM_LISTENER_JOINED);
+    socket.on(SocketEvents.STREAM_LISTENER_JOINED, async (payload: { listenerSocketId: string }) => {
+      const { listenerSocketId } = payload;
+      if (!this.isBroadcasting || !listenerSocketId) return;
+
+      console.log(`[LiveAudioStreamer] 🤝 Creating WebRTC Offer for listener: ${listenerSocketId}`);
+
+      try {
+        const pc = new RTCPeerConnection(RTC_CONFIG);
+        this.hostPeerConnections.set(listenerSocketId, pc);
+
+        // Add host audio track to peer connection
+        stream.getAudioTracks().forEach((track) => {
+          pc.addTrack(track, stream);
+        });
+
+        // Exchange ICE Candidates with this listener
+        pc.onicecandidate = (event) => {
+          if (event.candidate) {
+            socket.emit(SocketEvents.STREAM_ICE_CANDIDATE, {
+              roomId,
+              targetSocketId: listenerSocketId,
+              candidate: event.candidate,
+            });
+          }
+        };
+
+        const offer = await pc.createOffer({
+          offerToReceiveAudio: false,
+          offerToReceiveVideo: false,
+        });
+
+        await pc.setLocalDescription(offer);
+
+        socket.emit(SocketEvents.STREAM_OFFER, {
+          roomId,
+          targetSocketId: listenerSocketId,
+          sdp: offer,
+        });
+      } catch (e) {
+        console.error('[LiveAudioStreamer] Error creating offer for listener:', e);
+      }
+    });
+
+    // When listener sends back WebRTC Answer
+    socket.off(SocketEvents.STREAM_ANSWER);
+    socket.on(SocketEvents.STREAM_ANSWER, async (payload: { listenerSocketId: string; sdp: any }) => {
+      const { listenerSocketId, sdp } = payload;
+      const pc = this.hostPeerConnections.get(listenerSocketId);
+      if (pc && sdp) {
+        try {
+          console.log(`[LiveAudioStreamer] ✅ Received SDP Answer from listener ${listenerSocketId}`);
+          await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+        } catch (e) {
+          console.error('[LiveAudioStreamer] Error setting remote description from listener:', e);
+        }
+      }
+    });
+
+    // When listener sends ICE Candidate
+    socket.off(SocketEvents.STREAM_ICE_CANDIDATE);
+    socket.on(SocketEvents.STREAM_ICE_CANDIDATE, async (payload: { fromSocketId: string; candidate: any }) => {
+      const { fromSocketId, candidate } = payload;
+      const pc = this.hostPeerConnections.get(fromSocketId);
+      if (pc && candidate) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (e) {}
+      }
+    });
+  }
+
+  /**
+   * 2. LISTENER: Connect to Host's Live WebRTC Audio Stream
+   */
+  public joinStreamAsListener(roomId: string, socket: any) {
+    if (Platform.OS !== 'web' || typeof window === 'undefined' || !socket) return;
+
+    this.isListeningToStream = true;
+    console.log(`[LiveAudioStreamer] 🎧 Requesting to join live stream in room ${roomId}`);
+
+    // Clean up existing listener peer connection
+    if (this.listenerPeerConnection) {
+      this.listenerPeerConnection.close();
+      this.listenerPeerConnection = null;
+    }
+
+    // Bind listener socket handlers
+    socket.off(SocketEvents.STREAM_OFFER);
+    socket.on(SocketEvents.STREAM_OFFER, async (payload: { broadcasterSocketId: string; sdp: any }) => {
+      const { broadcasterSocketId, sdp } = payload;
+      console.log(`[LiveAudioStreamer] 📥 Received WebRTC Offer from host ${broadcasterSocketId}`);
+
+      try {
+        const pc = new RTCPeerConnection(RTC_CONFIG);
+        this.listenerPeerConnection = pc;
+
+        // When incoming audio stream arrives from host!
+        pc.ontrack = (event) => {
+          console.log('[LiveAudioStreamer] 🔊 Live Audio Track arrived from host!');
+          if (event.streams && event.streams[0]) {
+            this.playIncomingAudioStream(event.streams[0]);
+          }
+        };
+
+        pc.onicecandidate = (event) => {
+          if (event.candidate) {
+            socket.emit(SocketEvents.STREAM_ICE_CANDIDATE, {
+              roomId,
+              targetSocketId: broadcasterSocketId,
+              candidate: event.candidate,
+            });
+          }
+        };
+
+        await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+
+        socket.emit(SocketEvents.STREAM_ANSWER, {
+          roomId,
+          targetSocketId: broadcasterSocketId,
+          sdp: answer,
+        });
+      } catch (e) {
+        console.error('[LiveAudioStreamer] Listener error negotiating WebRTC stream:', e);
+      }
+    });
+
+    socket.off(SocketEvents.STREAM_ICE_CANDIDATE);
+    socket.on(SocketEvents.STREAM_ICE_CANDIDATE, async (payload: { candidate: any }) => {
+      if (this.listenerPeerConnection && payload.candidate) {
+        try {
+          await this.listenerPeerConnection.addIceCandidate(new RTCIceCandidate(payload.candidate));
+        } catch (e) {}
+      }
+    });
+
+    // Request stream from host
+    socket.emit(SocketEvents.STREAM_JOIN, { roomId });
+  }
+
+  /**
+   * Play incoming live audio stream on listener device
+   */
+  private playIncomingAudioStream(stream: MediaStream) {
+    if (typeof document === 'undefined') return;
+
+    try {
+      let audioEl = document.getElementById('room-live-stream-audio') as HTMLAudioElement;
+      if (!audioEl) {
+        audioEl = document.createElement('audio');
+        audioEl.id = 'room-live-stream-audio';
+        audioEl.autoplay = true;
+        (audioEl as any).playsInline = true;
+        audioEl.style.display = 'none';
+        document.body.appendChild(audioEl);
+      }
+
+      audioEl.srcObject = stream;
+      audioEl.volume = 1.0;
+      audioEl.play().catch((err) => {
+        console.warn('[LiveAudioStreamer] Autoplay was blocked, requiring user interaction:', err);
+      });
+
+      this.listenerAudioElement = audioEl;
+
+      // Analyze listener audio level for VU meter
+      this.initAudioAnalyzer(stream);
+    } catch (e) {
+      console.error('[LiveAudioStreamer] Error playing incoming audio:', e);
+    }
+  }
+
+  /**
+   * VU Meter analyzer
+   */
+  private initAudioAnalyzer(stream: MediaStream) {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+
+      if (!this.audioContext || this.audioContext.state === 'closed') {
+        this.audioContext = new AudioCtx();
+      }
+
+      const source = this.audioContext.createMediaStreamSource(stream);
+      const analyser = this.audioContext.createAnalyser();
+      analyser.fftSize = 64;
+      source.connect(analyser);
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const checkLevel = () => {
+        if (!this.isBroadcasting && !this.isListeningToStream) return;
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          sum += dataArray[i];
+        }
+        const avg = sum / dataArray.length;
+        const level = Math.min(1.0, avg / 128);
+        if (this.volumeCallback) {
+          this.volumeCallback(level);
+        }
+        requestAnimationFrame(checkLevel);
+      };
+      requestAnimationFrame(checkLevel);
+    } catch (e) {
+      console.warn('[LiveAudioStreamer] Analyzer init error:', e);
+    }
+  }
+
+  /**
+   * Stop broadcast
    */
   public stopBroadcast(roomId: string, socket: any) {
     this.isBroadcasting = false;
+    this.isListeningToStream = false;
 
-    if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+    // Close all host peer connections
+    for (const [id, pc] of this.hostPeerConnections.entries()) {
       try {
-        this.mediaRecorder.stop();
+        pc.close();
+      } catch (e) {}
+    }
+    this.hostPeerConnections.clear();
+
+    if (this.listenerPeerConnection) {
+      try {
+        this.listenerPeerConnection.close();
+      } catch (e) {}
+      this.listenerPeerConnection = null;
+    }
+
+    if (this.listenerAudioElement) {
+      try {
+        this.listenerAudioElement.pause();
+        this.listenerAudioElement.srcObject = null;
       } catch (e) {}
     }
 

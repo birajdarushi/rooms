@@ -239,6 +239,8 @@ export enum SocketEvents {
   STREAM_STARTED = 'stream:started',
   STREAM_STOP = 'stream:stop',
   STREAM_STOPPED = 'stream:stopped',
+  STREAM_JOIN = 'stream:join',
+  STREAM_LISTENER_JOINED = 'stream:listener-joined',
   STREAM_OFFER = 'stream:offer',
   STREAM_ANSWER = 'stream:answer',
   STREAM_ICE_CANDIDATE = 'stream:ice-candidate',
