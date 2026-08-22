@@ -386,8 +386,12 @@ export const NowPlayingCard: React.FC<Props> = ({
         {isLiveStreaming && !isHost && (
           <TouchableOpacity
             style={styles.tuneInBtn}
-            onPress={() => {
-              liveAudioStreamer.unmuteLiveAudio();
+            onPress={async () => {
+              if (Platform.OS === 'web') {
+                liveAudioStreamer.unmuteLiveAudio();
+              } else {
+                await audioEngine.play();
+              }
               onShowNotice?.('🔊 Connected to live stream audio!');
             }}
             activeOpacity={0.8}
