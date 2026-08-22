@@ -20,7 +20,7 @@ const server = http.createServer(app);
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 
-// Serve local upload files with audio headers for seeking support
+// Serve local upload files with audio and video headers for streaming
 app.use(
   '/uploads',
   express.static(config.storage.localUploadDir, {
@@ -29,6 +29,7 @@ app.use(
       res.setHeader('Access-Control-Allow-Origin', '*');
       if (filePath.endsWith('.mp3')) res.setHeader('Content-Type', 'audio/mpeg');
       else if (filePath.endsWith('.m4a')) res.setHeader('Content-Type', 'audio/mp4');
+      else if (filePath.endsWith('.mp4')) res.setHeader('Content-Type', 'video/mp4');
       else if (filePath.endsWith('.wav')) res.setHeader('Content-Type', 'audio/wav');
       else if (filePath.endsWith('.flac')) res.setHeader('Content-Type', 'audio/flac');
     },

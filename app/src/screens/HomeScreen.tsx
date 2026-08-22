@@ -16,6 +16,7 @@ import { api, setApiBaseUrl, getApiBaseUrl } from '../api/client';
 import { Room, UserSession } from '../types';
 import { saveSession } from '../services/SessionStorage';
 import { useAppTheme } from '../context/ThemeContext';
+import { LoungeVideoCard } from '../components/LoungeVideoCard';
 
 interface Props {
   onEnterRoom: (room: Room, user: UserSession) => void;
@@ -203,6 +204,9 @@ export const HomeScreen: React.FC<Props> = ({ onEnterRoom }) => {
         <View style={styles.topHeaderRow}>
           <Text style={[styles.brandSubtitle, { color: theme.textPrimary }]}>Midnight Jazz Lounge</Text>
         </View>
+
+        {/* 🎬 WaveRooms Lounge Video Autoplayer */}
+        <LoungeVideoCard />
 
         {/* Bento Main Card */}
         <View style={[styles.mainCard, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
