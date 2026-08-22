@@ -368,6 +368,7 @@ export const RoomScreen: React.FC<Props> = ({ room, user, onExit }) => {
                 memberCount={memberCount}
                 roomCode={room.code}
                 userDisplayName={user.displayName}
+                isLiveStreaming={isLiveStreaming}
                 onPlay={emitPlay}
                 onPause={emitPause}
                 onSeek={emitSeek}

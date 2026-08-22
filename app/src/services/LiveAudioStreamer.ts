@@ -272,6 +272,23 @@ export class LiveAudioStreamer {
   }
 
   /**
+   * Unmute / unlock audio on mobile device after user tap
+   */
+  public unmuteLiveAudio() {
+    try {
+      if (this.listenerAudioElement) {
+        this.listenerAudioElement.muted = false;
+        this.listenerAudioElement.play().catch(console.warn);
+      }
+      if (this.audioContext && this.audioContext.state === 'suspended') {
+        this.audioContext.resume().catch(console.warn);
+      }
+    } catch (e) {
+      console.warn('[LiveAudioStreamer] Unmute error:', e);
+    }
+  }
+
+  /**
    * VU Meter analyzer
    */
   private initAudioAnalyzer(stream: MediaStream) {

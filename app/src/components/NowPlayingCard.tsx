@@ -21,9 +21,12 @@ import {
   RotateCw,
   Music2,
   Plus,
+  Radio,
+  Volume2,
 } from 'lucide-react-native';
 import { Song, PlaybackStatus, QueueItem } from '../types';
 import { audioEngine } from '../services/AudioEngine';
+import { liveAudioStreamer } from '../services/LiveAudioStreamer';
 import { getTheme, getSongPalette, getAvatarColors } from '../constants/theme';
 import { AudioWaveformScrubber } from './AudioWaveformScrubber';
 
@@ -35,6 +38,7 @@ interface Props {
   memberCount: number;
   roomCode: string;
   userDisplayName: string;
+  isLiveStreaming?: boolean;
   onPlay: (songId: string, offsetSeconds: number) => void;
   onPause: (offsetSeconds: number) => void;
   onSeek: (offsetSeconds: number) => void;
@@ -53,6 +57,7 @@ export const NowPlayingCard: React.FC<Props> = ({
   memberCount,
   roomCode,
   userDisplayName,
+  isLiveStreaming = false,
   onPlay,
   onPause,
   onSeek,
@@ -345,13 +350,17 @@ export const NowPlayingCard: React.FC<Props> = ({
             style={[
               styles.artCard,
               {
-                backgroundColor: palette.primary,
-                borderColor: theme.cardBorder,
+                backgroundColor: isLiveStreaming ? '#ef4444' : palette.primary,
+                borderColor: isLiveStreaming ? '#ef4444' : theme.cardBorder,
               },
               isDesktop && { width: 170, height: 170, borderRadius: 20 },
             ]}
           >
-            {song?.artworkUrl ? (
+            {isLiveStreaming ? (
+              <View style={styles.musicPlaceholder}>
+                <Radio size={isDesktop ? 48 : 64} color="#ffffff" strokeWidth={2} />
+              </View>
+            ) : song?.artworkUrl ? (
               <Image source={{ uri: song.artworkUrl }} style={styles.artImage} resizeMode="cover" />
             ) : (
               <View style={styles.musicPlaceholder}>
@@ -363,26 +372,41 @@ export const NowPlayingCard: React.FC<Props> = ({
 
         {/* Title & Artist */}
         <Text style={[styles.trackTitle, { color: theme.textPrimary }, isDesktop && { fontSize: 20, marginBottom: 2 }]} numberOfLines={1}>
-          {song?.title || 'No Track Playing'}
+          {isLiveStreaming ? '🔴 Live System Audio Broadcast' : (song?.title || 'No Track Playing')}
         </Text>
         <Text style={[styles.trackArtist, { color: theme.textSecondary }, isDesktop && { fontSize: 13 }]} numberOfLines={1}>
-          {song?.artist || (isHost ? 'Add tracks below to start' : 'Waiting for host')}
+          {isLiveStreaming ? 'Live stream from host system' : (song?.artist || (isHost ? 'Add tracks below to start' : 'Waiting for host'))}
           {' · '}
           <Text style={{ color: theme.textMuted }}>
             {isHost ? 'Host Session' : 'Listening Party'}
           </Text>
         </Text>
 
+        {/* 🔊 Mobile Listener Tap to Tune In / Unmute Action Bar */}
+        {isLiveStreaming && !isHost && (
+          <TouchableOpacity
+            style={styles.tuneInBtn}
+            onPress={() => {
+              liveAudioStreamer.unmuteLiveAudio();
+              onShowNotice?.('🔊 Connected to live stream audio!');
+            }}
+            activeOpacity={0.8}
+          >
+            <Volume2 size={16} color="#ffffff" />
+            <Text style={styles.tuneInBtnText}>Tap to Tune In / Unmute</Text>
+          </TouchableOpacity>
+        )}
+
         {/* Sync Pill with live equalizer bars */}
-        <View style={[styles.syncPill, { backgroundColor: theme.pillMintBg, borderColor: theme.cardBorder }, isDesktop && { marginTop: 8, paddingVertical: 4, paddingHorizontal: 10 }]}>
+        <View style={[styles.syncPill, { backgroundColor: isLiveStreaming ? 'rgba(239, 68, 68, 0.15)' : theme.pillMintBg, borderColor: isLiveStreaming ? '#ef4444' : theme.cardBorder }, isDesktop && { marginTop: 8, paddingVertical: 4, paddingHorizontal: 10 }]}>
           <View style={styles.equalizerRow}>
-            <Animated.View style={[styles.eqBar, { backgroundColor: theme.pillMintText, transform: [{ scaleY: eq1 }] }]} />
-            <Animated.View style={[styles.eqBar, { backgroundColor: theme.pillMintText, transform: [{ scaleY: eq2 }] }]} />
-            <Animated.View style={[styles.eqBar, { backgroundColor: theme.pillMintText, transform: [{ scaleY: eq3 }] }]} />
-            <Animated.View style={[styles.eqBar, { backgroundColor: theme.pillMintText, transform: [{ scaleY: eq4 }] }]} />
+            <Animated.View style={[styles.eqBar, { backgroundColor: isLiveStreaming ? '#ef4444' : theme.pillMintText, transform: [{ scaleY: eq1 }] }]} />
+            <Animated.View style={[styles.eqBar, { backgroundColor: isLiveStreaming ? '#ef4444' : theme.pillMintText, transform: [{ scaleY: eq2 }] }]} />
+            <Animated.View style={[styles.eqBar, { backgroundColor: isLiveStreaming ? '#ef4444' : theme.pillMintText, transform: [{ scaleY: eq3 }] }]} />
+            <Animated.View style={[styles.eqBar, { backgroundColor: isLiveStreaming ? '#ef4444' : theme.pillMintText, transform: [{ scaleY: eq4 }] }]} />
           </View>
-          <Text style={[styles.syncPillText, { color: theme.pillMintText }, isDesktop && { fontSize: 11 }]}>
-            {memberCount} {memberCount === 1 ? 'person' : 'people'}, same beat
+          <Text style={[styles.syncPillText, { color: isLiveStreaming ? '#ef4444' : theme.pillMintText }, isDesktop && { fontSize: 11 }]}>
+            {isLiveStreaming ? 'LIVE 48kHz WebRTC Stream' : `${memberCount} ${memberCount === 1 ? 'person' : 'people'}, same beat`}
           </Text>
         </View>
       </View>
@@ -653,6 +677,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     textAlign: 'center',
+  },
+  tuneInBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#ef4444',
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 22,
+    marginTop: 12,
+    shadowColor: '#ef4444',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  tuneInBtnText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
   },
   syncPill: {
     flexDirection: 'row',
