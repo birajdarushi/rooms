@@ -7,6 +7,7 @@ import { config } from './config/env';
 import { roomsRouter } from './routes/rooms';
 import { storageRouter } from './routes/storage';
 import { youtubeRouter } from './routes/youtube';
+import { spotifyRouter } from './routes/spotify';
 import { registerRoomLifecycle } from './sockets/roomLifecycle';
 import { registerSyncAndPlaybackHandlers, setSocketServer } from './sockets/syncHandler';
 import { storageService } from './services/storage';
@@ -43,6 +44,7 @@ app.get('/health', (req, res) => {
 app.use('/api/rooms', roomsRouter);
 app.use('/api/storage', storageRouter);
 app.use('/api/youtube', youtubeRouter);
+app.use('/api/spotify', spotifyRouter);
 
 // Initialize Socket.io Server
 const io = new SocketIOServer(server, {

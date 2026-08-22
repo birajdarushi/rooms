@@ -248,4 +248,40 @@ export const api = {
     }
     return res.json();
   },
+
+  async getSpotifyInfo(url: string): Promise<any> {
+    const res = await fetch(`${apiBaseUrl}/api/spotify/info`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to fetch Spotify track info');
+    }
+    const data = await res.json();
+    return data.info;
+  },
+
+  async addSpotifySong(
+    roomId: string,
+    data: { url: string; title?: string; artist?: string; uploaderId?: string }
+  ): Promise<{ song: Song; queueItem: QueueItem }> {
+    const res = await fetch(`${apiBaseUrl}/api/spotify/queue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roomId,
+        url: data.url,
+        title: data.title,
+        artist: data.artist,
+        uploaderId: data.uploaderId || 'host',
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to add Spotify track to room queue');
+    }
+    return res.json();
+  },
 };

@@ -13,7 +13,20 @@ import {
   ScrollView,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
-import { UploadCloud, X, Music, CheckCircle2, Youtube, Sparkles, ClipboardPaste, Clock, User, Play } from 'lucide-react-native';
+import {
+  Sparkles,
+  X,
+  UploadCloud,
+  CheckCircle2,
+  Youtube,
+  ClipboardPaste,
+  Clock,
+  User,
+  Music,
+  Link,
+  Radio,
+  FileAudio,
+} from 'lucide-react-native';
 import { api } from '../api/client';
 import { useAppTheme } from '../context/ThemeContext';
 
@@ -24,36 +37,109 @@ interface Props {
   onSuccess: () => void;
 }
 
+type DetectedSource = 'spotify' | 'youtube' | 'file' | null;
+
 export const UploadModal: React.FC<Props> = ({ visible, roomId, onClose, onSuccess }) => {
   const { isDark, theme } = useAppTheme();
-  const [activeTab, setActiveTab] = useState<'upload' | 'youtube'>('youtube');
 
-  // File Upload State
-  const [selectedFile, setSelectedFile] = useState<any>(null);
-  const [title, setTitle] = useState('');
-  const [artist, setArtist] = useState('');
-  const [duration, setDuration] = useState<number>(180);
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadStep, setUploadStep] = useState<string>('');
+  // Smart Input State
+  const [smartLink, setSmartLink] = useState('');
+  const [detectedSource, setDetectedSource] = useState<DetectedSource>(null);
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
 
-  // YouTube State
-  const [youtubeUrl, setYoutubeUrl] = useState('');
-  const [ytLoadingInfo, setYtLoadingInfo] = useState(false);
-  const [ytInfo, setYtInfo] = useState<{
+  // Resolved Link Preview State
+  const [previewInfo, setPreviewInfo] = useState<{
     title: string;
     artist: string;
     duration: number;
     thumbnail: string;
-    youtubeUrl: string;
+    source: 'spotify' | 'youtube';
   } | null>(null);
 
+  // File Upload State
+  const [selectedFile, setSelectedFile] = useState<any>(null);
+  const [fileTitle, setFileTitle] = useState('');
+  const [fileArtist, setFileArtist] = useState('');
+  const [fileDuration, setFileDuration] = useState<number>(180);
+
+  // Processing State
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingStep, setProcessingStep] = useState<string>('');
+
   const formatSeconds = (sec: number) => {
+    if (!sec || isNaN(sec)) return '0:00';
     const m = Math.floor(sec / 60);
     const s = Math.floor(sec % 60);
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
-  const handlePickAudio = async () => {
+  const detectLinkType = (text: string): 'spotify' | 'youtube' | null => {
+    const raw = text.trim();
+    if (/spotify\.com\/track|spotify:track/i.test(raw)) return 'spotify';
+    if (/youtube\.com|youtu\.be/i.test(raw)) return 'youtube';
+    return null;
+  };
+
+  const handleLinkChange = (text: string) => {
+    setSmartLink(text);
+    if (selectedFile) {
+      setSelectedFile(null);
+    }
+
+    const type = detectLinkType(text);
+    setDetectedSource(type);
+
+    if (type) {
+      fetchLinkPreview(text.trim(), type);
+    } else {
+      setPreviewInfo(null);
+    }
+  };
+
+  const fetchLinkPreview = async (url: string, type: 'spotify' | 'youtube') => {
+    if (!url) return;
+    try {
+      setIsLoadingPreview(true);
+      if (type === 'spotify') {
+        const info = await api.getSpotifyInfo(url);
+        setPreviewInfo({
+          title: info.title,
+          artist: info.artist,
+          duration: info.duration,
+          thumbnail: info.thumbnail,
+          source: 'spotify',
+        });
+      } else {
+        const info = await api.getYoutubeInfo(url);
+        setPreviewInfo({
+          title: info.title,
+          artist: info.artist,
+          duration: info.duration,
+          thumbnail: info.thumbnail,
+          source: 'youtube',
+        });
+      }
+    } catch (err: any) {
+      console.warn('[SmartModal] Error fetching link preview:', err);
+    } finally {
+      setIsLoadingPreview(false);
+    }
+  };
+
+  const handlePasteClipboard = async () => {
+    try {
+      if (Platform.OS === 'web' && typeof navigator !== 'undefined' && (navigator as any).clipboard?.readText) {
+        const text = await (navigator as any).clipboard.readText();
+        if (text && text.trim()) {
+          handleLinkChange(text.trim());
+        }
+      }
+    } catch (e) {
+      console.warn('Clipboard read failed:', e);
+    }
+  };
+
+  const handlePickAudioFile = async () => {
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
       const input = document.createElement('input');
       input.type = 'file';
@@ -85,14 +171,13 @@ export const UploadModal: React.FC<Props> = ({ visible, roomId, onClose, onSucce
 
   const processAudioFile = (fileObj: any, fileName: string, mimeType: string, fileSize: number) => {
     setSelectedFile(fileObj);
+    setSmartLink('');
+    setPreviewInfo(null);
+    setDetectedSource('file');
 
     const cleanName = fileName.replace(/\.[^/.]+$/, '');
-    if (!title) {
-      setTitle(cleanName);
-    }
-    if (!artist) {
-      setArtist('Uploaded Track');
-    }
+    setFileTitle(cleanName);
+    setFileArtist('Uploaded Track');
 
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       try {
@@ -101,125 +186,102 @@ export const UploadModal: React.FC<Props> = ({ visible, roomId, onClose, onSucce
         audio.src = url;
         audio.onloadedmetadata = () => {
           if (audio.duration && !isNaN(audio.duration)) {
-            setDuration(Math.round(audio.duration));
+            setFileDuration(Math.round(audio.duration));
           }
           URL.revokeObjectURL(url);
         };
-      } catch (e) {
-        console.warn('Could not read audio duration preview:', e);
-      }
+      } catch (e) {}
     }
   };
 
-  const handlePasteYoutubeClipboard = async () => {
-    try {
-      if (Platform.OS === 'web' && typeof navigator !== 'undefined' && (navigator as any).clipboard?.readText) {
-        const text = await (navigator as any).clipboard.readText();
-        if (text && text.trim()) {
-          setYoutubeUrl(text.trim());
-          fetchYoutubeInfo(text.trim());
+  const handleSubmit = async () => {
+    // 1. If Spotify or YouTube Link
+    if (detectedSource === 'spotify' || detectedSource === 'youtube') {
+      const url = smartLink.trim();
+      try {
+        setIsProcessing(true);
+        setProcessingStep(
+          detectedSource === 'spotify'
+            ? 'Extracting Spotify track audio...'
+            : 'Extracting YouTube audio...'
+        );
+
+        if (detectedSource === 'spotify') {
+          await api.addSpotifySong(roomId, {
+            url,
+            title: previewInfo?.title,
+            artist: previewInfo?.artist,
+          });
+        } else {
+          await api.addYoutubeSong(roomId, {
+            url,
+            title: previewInfo?.title,
+            artist: previewInfo?.artist,
+          });
         }
+
+        setIsProcessing(false);
+        resetAndClose();
+      } catch (err: any) {
+        console.error('Link queue failed:', err);
+        setIsProcessing(false);
+        Alert.alert('Queue Error', err.message || 'Failed to process audio stream.');
       }
-    } catch (e) {
-      console.warn('Clipboard read failed:', e);
-    }
-  };
-
-  const fetchYoutubeInfo = async (urlToFetch?: string) => {
-    const targetUrl = (urlToFetch || youtubeUrl).trim();
-    if (!targetUrl) return;
-
-    try {
-      setYtLoadingInfo(true);
-      const info = await api.getYoutubeInfo(targetUrl);
-      setYtInfo(info);
-    } catch (err: any) {
-      console.warn('Could not fetch YouTube info:', err);
-      Alert.alert('YouTube Link', err.message || 'Please check the YouTube URL.');
-    } finally {
-      setYtLoadingInfo(false);
-    }
-  };
-
-  const handleUploadAndQueue = async () => {
-    if (!selectedFile) {
-      Alert.alert('Select File', 'Please pick an audio file first.');
-      return;
-    }
-    if (!title.trim()) {
-      Alert.alert('Missing Title', 'Please enter a song title.');
       return;
     }
 
-    try {
-      setIsUploading(true);
-      setUploadStep('Getting upload credentials...');
+    // 2. If Local Audio File
+    if (selectedFile) {
+      try {
+        setIsProcessing(true);
+        setProcessingStep('Preparing upload credentials...');
 
-      const filename = selectedFile.name || 'audio.mp3';
-      const mimeType = selectedFile.type || selectedFile.mimeType || 'audio/mpeg';
+        const filename = selectedFile.name || 'audio.mp3';
+        const mimeType = selectedFile.type || selectedFile.mimeType || 'audio/mpeg';
 
-      const { uploadUrl, storageKey, publicUrl } = await api.getPresignedUploadUrl(
-        roomId,
-        filename,
-        mimeType
-      );
+        const { uploadUrl, storageKey, publicUrl } = await api.getPresignedUploadUrl(
+          roomId,
+          filename,
+          mimeType
+        );
 
-      setUploadStep('Uploading direct to storage...');
-      await api.uploadToStorage(uploadUrl, selectedFile, mimeType);
+        setProcessingStep('Uploading audio directly to storage...');
+        await api.uploadToStorage(uploadUrl, selectedFile, mimeType);
 
-      setUploadStep('Adding to room queue...');
-      await api.registerSong(roomId, {
-        storageUrl: publicUrl,
-        storageKey,
-        title: title.trim(),
-        artist: artist.trim() || 'Unknown Artist',
-        duration: duration > 0 ? duration : 180,
-      });
+        setProcessingStep('Adding to room queue...');
+        await api.registerSong(roomId, {
+          storageUrl: publicUrl,
+          storageKey,
+          title: fileTitle.trim() || 'Untitled Track',
+          artist: fileArtist.trim() || 'Uploaded Artist',
+          duration: fileDuration > 0 ? fileDuration : 180,
+        });
 
-      setIsUploading(false);
-      resetAndClose();
-    } catch (err: any) {
-      console.error('Upload failed:', err);
-      setIsUploading(false);
-      Alert.alert('Upload Error', err.message || 'Failed to upload audio.');
-    }
-  };
-
-  const handleQueueYoutube = async () => {
-    const targetUrl = youtubeUrl.trim();
-    if (!targetUrl) {
-      Alert.alert('YouTube Link', 'Please paste a valid YouTube URL.');
+        setIsProcessing(false);
+        resetAndClose();
+      } catch (err: any) {
+        console.error('File upload failed:', err);
+        setIsProcessing(false);
+        Alert.alert('Upload Error', err.message || 'Failed to upload audio.');
+      }
       return;
     }
 
-    try {
-      setIsUploading(true);
-      setUploadStep('Extracting audio from YouTube...');
-
-      await api.addYoutubeSong(roomId, {
-        url: targetUrl,
-        title: ytInfo?.title,
-        artist: ytInfo?.artist,
-      });
-
-      setIsUploading(false);
-      resetAndClose();
-    } catch (err: any) {
-      console.error('YouTube Queue failed:', err);
-      setIsUploading(false);
-      Alert.alert('YouTube Error', err.message || 'Failed to process YouTube audio.');
-    }
+    Alert.alert('Add Song', 'Please paste a Spotify/YouTube link or pick an audio file.');
   };
 
   const resetAndClose = () => {
+    setSmartLink('');
+    setPreviewInfo(null);
     setSelectedFile(null);
-    setTitle('');
-    setArtist('');
-    setYoutubeUrl('');
-    setYtInfo(null);
+    setDetectedSource(null);
+    setFileTitle('');
+    setFileArtist('');
     onSuccess();
     onClose();
   };
+
+  const isSubmitDisabled = isProcessing || (!smartLink.trim() && !selectedFile);
 
   return (
     <Modal visible={visible} transparent animationType="slide">
@@ -231,226 +293,192 @@ export const UploadModal: React.FC<Props> = ({ visible, roomId, onClose, onSucce
               <Sparkles size={20} color={theme.accent} />
               <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>Add Track to Party</Text>
             </View>
-            <TouchableOpacity onPress={onClose} disabled={isUploading}>
+            <TouchableOpacity onPress={onClose} disabled={isProcessing}>
               <X size={20} color={theme.textMuted} />
             </TouchableOpacity>
           </View>
 
-          {/* Segmented Mode Selector */}
-          <View style={[styles.tabRow, { backgroundColor: theme.elevatedBg, borderColor: theme.cardBorder }]}>
-            <TouchableOpacity
-              style={[styles.tabBtn, activeTab === 'youtube' && [styles.activeTabBtn, { backgroundColor: theme.cardBg }]]}
-              onPress={() => setActiveTab('youtube')}
-            >
-              <Youtube size={16} color={activeTab === 'youtube' ? '#ef4444' : theme.textMuted} />
-              <Text
-                style={[
-                  styles.tabBtnText,
-                  { color: activeTab === 'youtube' ? theme.textPrimary : theme.textMuted },
-                ]}
-              >
-                YouTube Link
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.tabBtn, activeTab === 'upload' && [styles.activeTabBtn, { backgroundColor: theme.cardBg }]]}
-              onPress={() => setActiveTab('upload')}
-            >
-              <UploadCloud size={16} color={activeTab === 'upload' ? theme.accent : theme.textMuted} />
-              <Text
-                style={[
-                  styles.tabBtnText,
-                  { color: activeTab === 'upload' ? theme.textPrimary : theme.textMuted },
-                ]}
-              >
-                Audio File
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* TAB 1: YOUTUBE LINK */}
-          {activeTab === 'youtube' && (
-            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 420 }}>
-              <View style={styles.formGroup}>
-                <View style={styles.inputHeaderRow}>
-                  <Text style={[styles.label, { color: theme.textSecondary }]}>YouTube / Music URL</Text>
-                  {Platform.OS === 'web' && (
-                    <TouchableOpacity onPress={handlePasteYoutubeClipboard} style={[styles.pasteBadge, { backgroundColor: theme.elevatedBg }]}>
-                      <ClipboardPaste size={12} color={theme.accent} />
-                      <Text style={[styles.pasteBadgeText, { color: theme.accent }]}>Paste Link</Text>
-                    </TouchableOpacity>
+          <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 460 }}>
+            {/* Smart Link Input */}
+            <View style={styles.formGroup}>
+              <View style={styles.inputHeaderRow}>
+                <View style={styles.labelRow}>
+                  <Text style={[styles.label, { color: theme.textSecondary }]}>Paste Song Link</Text>
+                  {detectedSource === 'spotify' && (
+                    <View style={[styles.sourceBadge, { backgroundColor: '#1DB954' }]}>
+                      <Radio size={11} color="#ffffff" />
+                      <Text style={styles.sourceBadgeText}>Spotify Detected</Text>
+                    </View>
+                  )}
+                  {detectedSource === 'youtube' && (
+                    <View style={[styles.sourceBadge, { backgroundColor: '#ef4444' }]}>
+                      <Youtube size={11} color="#ffffff" />
+                      <Text style={styles.sourceBadgeText}>YouTube Detected</Text>
+                    </View>
                   )}
                 </View>
-                <View style={styles.urlInputRow}>
-                  <TextInput
-                    style={[styles.input, { flex: 1, backgroundColor: theme.elevatedBg, borderColor: theme.cardBorder, color: theme.textPrimary }]}
-                    placeholder="e.g. https://youtu.be/... or youtube.com/watch?v=..."
-                    placeholderTextColor={theme.textMuted}
-                    value={youtubeUrl}
-                    onChangeText={(t) => {
-                      setYoutubeUrl(t);
-                      if (t.includes('youtu.be') || t.includes('youtube.com')) {
-                        fetchYoutubeInfo(t);
-                      }
-                    }}
-                    onBlur={() => fetchYoutubeInfo()}
-                    editable={!isUploading}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
-                  <TouchableOpacity
-                    style={[styles.previewBtn, { backgroundColor: theme.accent }]}
-                    onPress={() => fetchYoutubeInfo()}
-                    disabled={ytLoadingInfo || isUploading}
-                  >
-                    {ytLoadingInfo ? (
-                      <ActivityIndicator size="small" color="#ffffff" />
-                    ) : (
-                      <Text style={styles.previewBtnText}>Check</Text>
-                    )}
+
+                {Platform.OS === 'web' && (
+                  <TouchableOpacity onPress={handlePasteClipboard} style={[styles.pasteBadge, { backgroundColor: theme.elevatedBg }]}>
+                    <ClipboardPaste size={12} color={theme.accent} />
+                    <Text style={[styles.pasteBadgeText, { color: theme.accent }]}>Paste</Text>
                   </TouchableOpacity>
-                </View>
+                )}
               </View>
 
-              {/* YouTube Preview Card */}
-              {ytInfo && (
-                <View style={[styles.ytPreviewCard, { backgroundColor: theme.elevatedBg, borderColor: theme.cardBorder }]}>
-                  {ytInfo.thumbnail ? (
-                    <Image source={{ uri: ytInfo.thumbnail }} style={styles.ytThumbnail} resizeMode="cover" />
-                  ) : (
-                    <View style={[styles.ytThumbnailPlaceholder, { backgroundColor: theme.cardBorder }]}>
-                      <Play size={24} color="#ffffff" />
-                    </View>
-                  )}
-                  <View style={styles.ytPreviewDetails}>
-                    <Text style={[styles.ytPreviewTitle, { color: theme.textPrimary }]} numberOfLines={2}>
-                      {ytInfo.title}
-                    </Text>
-                    <View style={styles.ytMetaRow}>
-                      <User size={12} color={theme.textMuted} />
-                      <Text style={[styles.ytMetaText, { color: theme.textSecondary }]} numberOfLines={1}>
-                        {ytInfo.artist}
-                      </Text>
-                    </View>
-                    <View style={styles.ytMetaRow}>
-                      <Clock size={12} color={theme.accent} />
-                      <Text style={[styles.ytMetaText, { color: theme.accent, fontWeight: '700' }]}>
-                        {formatSeconds(ytInfo.duration)}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              )}
-
-              {/* Upload Status */}
-              {isUploading && (
-                <View style={[styles.progressBox, { backgroundColor: theme.pillBlueBg }]}>
-                  <ActivityIndicator size="small" color={theme.accent} />
-                  <Text style={[styles.progressText, { color: theme.accent }]}>{uploadStep}</Text>
-                </View>
-              )}
-
-              {/* Action Button */}
-              <TouchableOpacity
-                style={[
-                  styles.submitButton,
-                  { backgroundColor: '#ef4444' },
-                  (!youtubeUrl.trim() || isUploading) && styles.disabledSubmit,
-                ]}
-                onPress={handleQueueYoutube}
-                disabled={!youtubeUrl.trim() || isUploading}
-              >
-                <Youtube size={18} color="#ffffff" />
-                <Text style={styles.submitText}>
-                  {isUploading ? 'Extracting & Syncing...' : 'Add YouTube Track to Queue'}
-                </Text>
-              </TouchableOpacity>
-            </ScrollView>
-          )}
-
-          {/* TAB 2: LOCAL AUDIO FILE */}
-          {activeTab === 'upload' && (
-            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 420 }}>
-              <TouchableOpacity
-                style={[
-                  styles.pickButton,
-                  { backgroundColor: theme.elevatedBg, borderColor: theme.cardBorder },
-                  selectedFile && styles.pickedFileCard,
-                ]}
-                onPress={handlePickAudio}
-                disabled={isUploading}
-              >
-                {selectedFile ? (
-                  <View style={styles.pickedFileInfo}>
-                    <CheckCircle2 size={24} color="#22c55e" />
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.pickedFileName, { color: theme.textPrimary }]} numberOfLines={1}>
-                        {selectedFile.name || 'Audio File Selected'}
-                      </Text>
-                      <Text style={[styles.pickedFileSize, { color: theme.textSecondary }]}>
-                        {selectedFile.size ? `${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB` : 'Ready to upload'}
-                      </Text>
-                    </View>
-                  </View>
-                ) : (
-                  <View style={styles.pickPrompt}>
-                    <Music size={32} color={theme.accent} />
-                    <Text style={[styles.pickPromptText, { color: theme.textPrimary }]}>Click to select MP3, WAV, M4A, FLAC</Text>
-                    <Text style={[styles.pickPromptSub, { color: theme.textMuted }]}>Direct upload to room audio storage</Text>
+              <View style={styles.urlInputRow}>
+                <TextInput
+                  style={[
+                    styles.input,
+                    {
+                      flex: 1,
+                      backgroundColor: theme.elevatedBg,
+                      borderColor: detectedSource === 'spotify' ? '#1DB954' : detectedSource === 'youtube' ? '#ef4444' : theme.cardBorder,
+                      color: theme.textPrimary,
+                    },
+                  ]}
+                  placeholder="Paste Spotify link or YouTube link..."
+                  placeholderTextColor={theme.textMuted}
+                  value={smartLink}
+                  onChangeText={handleLinkChange}
+                  editable={!isProcessing}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                {isLoadingPreview && (
+                  <View style={styles.loadingIndicatorBox}>
+                    <ActivityIndicator size="small" color={theme.accent} />
                   </View>
                 )}
-              </TouchableOpacity>
-
-              <View style={styles.formGroup}>
-                <Text style={[styles.label, { color: theme.textSecondary }]}>Song Title</Text>
-                <TextInput
-                  style={[styles.input, { backgroundColor: theme.elevatedBg, borderColor: theme.cardBorder, color: theme.textPrimary }]}
-                  placeholder="e.g. Midnight City"
-                  placeholderTextColor={theme.textMuted}
-                  value={title}
-                  onChangeText={setTitle}
-                  editable={!isUploading}
-                />
               </View>
+            </View>
 
-              <View style={styles.formGroup}>
-                <Text style={[styles.label, { color: theme.textSecondary }]}>Artist</Text>
-                <TextInput
-                  style={[styles.input, { backgroundColor: theme.elevatedBg, borderColor: theme.cardBorder, color: theme.textPrimary }]}
-                  placeholder="e.g. M83"
-                  placeholderTextColor={theme.textMuted}
-                  value={artist}
-                  onChangeText={setArtist}
-                  editable={!isUploading}
-                />
+            {/* Smart Link Preview Card */}
+            {previewInfo && (
+              <View
+                style={[
+                  styles.previewCard,
+                  {
+                    backgroundColor: theme.elevatedBg,
+                    borderColor: previewInfo.source === 'spotify' ? 'rgba(29, 185, 84, 0.4)' : 'rgba(239, 68, 68, 0.4)',
+                  },
+                ]}
+              >
+                {previewInfo.thumbnail ? (
+                  <Image source={{ uri: previewInfo.thumbnail }} style={styles.previewThumb} resizeMode="cover" />
+                ) : (
+                  <View style={[styles.previewThumbPlaceholder, { backgroundColor: theme.cardBorder }]}>
+                    <Music size={24} color="#ffffff" />
+                  </View>
+                )}
+                <View style={styles.previewDetails}>
+                  <View style={styles.badgeRow}>
+                    <View
+                      style={[
+                        styles.miniBadge,
+                        { backgroundColor: previewInfo.source === 'spotify' ? '#1DB954' : '#ef4444' },
+                      ]}
+                    >
+                      <Text style={styles.miniBadgeText}>
+                        {previewInfo.source === 'spotify' ? 'SPOTIFY' : 'YOUTUBE'}
+                      </Text>
+                    </View>
+                    <Text style={[styles.durationBadgeText, { color: theme.accent }]}>
+                      {formatSeconds(previewInfo.duration)}
+                    </Text>
+                  </View>
+                  <Text style={[styles.previewTitle, { color: theme.textPrimary }]} numberOfLines={1}>
+                    {previewInfo.title}
+                  </Text>
+                  <Text style={[styles.previewArtist, { color: theme.textSecondary }]} numberOfLines={1}>
+                    {previewInfo.artist}
+                  </Text>
+                </View>
               </View>
+            )}
 
-              {/* Upload Status */}
-              {isUploading && (
-                <View style={[styles.progressBox, { backgroundColor: theme.pillBlueBg }]}>
-                  <ActivityIndicator size="small" color={theme.accent} />
-                  <Text style={[styles.progressText, { color: theme.accent }]}>{uploadStep}</Text>
+            {/* Divider OR */}
+            <View style={styles.orDividerRow}>
+              <View style={[styles.orDividerLine, { backgroundColor: theme.cardBorder }]} />
+              <Text style={[styles.orDividerText, { color: theme.textMuted }]}>OR PICK A FILE</Text>
+              <View style={[styles.orDividerLine, { backgroundColor: theme.cardBorder }]} />
+            </View>
+
+            {/* File Upload Selector */}
+            <TouchableOpacity
+              style={[
+                styles.filePickButton,
+                { backgroundColor: theme.elevatedBg, borderColor: selectedFile ? '#22c55e' : theme.cardBorder },
+                selectedFile && styles.filePickedCard,
+              ]}
+              onPress={handlePickAudioFile}
+              disabled={isProcessing}
+            >
+              {selectedFile ? (
+                <View style={styles.fileInfoRow}>
+                  <CheckCircle2 size={22} color="#22c55e" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.fileInfoName, { color: theme.textPrimary }]} numberOfLines={1}>
+                      {selectedFile.name || fileTitle || 'Audio File Ready'}
+                    </Text>
+                    <Text style={[styles.fileInfoSize, { color: theme.textSecondary }]}>
+                      {selectedFile.size ? `${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB` : 'Local file selected'}
+                    </Text>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.filePromptRow}>
+                  <UploadCloud size={20} color={theme.accent} />
+                  <Text style={[styles.filePromptText, { color: theme.textPrimary }]}>Choose MP3, WAV, M4A, FLAC</Text>
                 </View>
               )}
+            </TouchableOpacity>
 
-              {/* Action Button */}
-              <TouchableOpacity
-                style={[
-                  styles.submitButton,
-                  { backgroundColor: theme.accent },
-                  (!selectedFile || isUploading) && styles.disabledSubmit,
-                ]}
-                onPress={handleUploadAndQueue}
-                disabled={!selectedFile || isUploading}
-              >
+            {/* Processing Step Box */}
+            {isProcessing && (
+              <View style={[styles.progressBox, { backgroundColor: theme.pillBlueBg }]}>
+                <ActivityIndicator size="small" color={theme.accent} />
+                <Text style={[styles.progressText, { color: theme.accent }]}>{processingStep}</Text>
+              </View>
+            )}
+
+            {/* Unified Submit Button */}
+            <TouchableOpacity
+              style={[
+                styles.submitButton,
+                {
+                  backgroundColor:
+                    detectedSource === 'spotify'
+                      ? '#1DB954'
+                      : detectedSource === 'youtube'
+                      ? '#ef4444'
+                      : theme.accent,
+                },
+                isSubmitDisabled && styles.disabledSubmit,
+              ]}
+              onPress={handleSubmit}
+              disabled={isSubmitDisabled}
+            >
+              {detectedSource === 'spotify' ? (
+                <Radio size={18} color="#ffffff" />
+              ) : detectedSource === 'youtube' ? (
+                <Youtube size={18} color="#ffffff" />
+              ) : (
                 <UploadCloud size={18} color="#ffffff" />
-                <Text style={styles.submitText}>
-                  {isUploading ? 'Uploading & Syncing...' : 'Upload & Add to Queue'}
-                </Text>
-              </TouchableOpacity>
-            </ScrollView>
-          )}
+              )}
+              <Text style={styles.submitText}>
+                {isProcessing
+                  ? 'Processing & Syncing...'
+                  : detectedSource === 'spotify'
+                  ? 'Add Spotify Track to Queue'
+                  : detectedSource === 'youtube'
+                  ? 'Add YouTube Track to Queue'
+                  : selectedFile
+                  ? 'Upload & Add to Queue'
+                  : 'Add Track to Queue'}
+              </Text>
+            </TouchableOpacity>
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -491,36 +519,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: -0.3,
   },
-  tabRow: {
-    flexDirection: 'row',
-    padding: 4,
-    borderRadius: 14,
-    borderWidth: 1,
-    marginBottom: 18,
-    gap: 6,
-  },
-  tabBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 9,
-    borderRadius: 10,
-    gap: 6,
-  },
-  activeTabBtn: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  tabBtnText: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
   formGroup: {
-    marginBottom: 14,
+    marginBottom: 12,
   },
   inputHeaderRow: {
     flexDirection: 'row',
@@ -528,11 +528,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 6,
   },
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   label: {
     fontSize: 11,
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+  },
+  sourceBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  sourceBadgeText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
   },
   pasteBadge: {
     flexDirection: 'row',
@@ -548,97 +567,121 @@ const styles = StyleSheet.create({
   },
   urlInputRow: {
     flexDirection: 'row',
-    gap: 8,
+    alignItems: 'center',
+    position: 'relative',
   },
   input: {
     borderWidth: 1,
     borderRadius: 12,
     paddingHorizontal: 14,
-    paddingVertical: 11,
+    paddingVertical: 12,
     fontSize: 14,
   },
-  previewBtn: {
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
+  loadingIndicatorBox: {
+    position: 'absolute',
+    right: 12,
   },
-  previewBtnText: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  ytPreviewCard: {
+  previewCard: {
     flexDirection: 'row',
     padding: 10,
     borderRadius: 14,
     borderWidth: 1,
-    marginBottom: 16,
+    marginBottom: 14,
     gap: 12,
+    alignItems: 'center',
   },
-  ytThumbnail: {
-    width: 90,
+  previewThumb: {
+    width: 65,
     height: 65,
     borderRadius: 8,
   },
-  ytThumbnailPlaceholder: {
-    width: 90,
+  previewThumbPlaceholder: {
+    width: 65,
     height: 65,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  ytPreviewDetails: {
+  previewDetails: {
     flex: 1,
-    justifyContent: 'space-between',
+    justifyContent: 'center',
+    gap: 2,
   },
-  ytPreviewTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    lineHeight: 17,
-  },
-  ytMetaRow: {
+  badgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    justifyContent: 'space-between',
+    marginBottom: 2,
   },
-  ytMetaText: {
+  miniBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 4,
+  },
+  miniBadgeText: {
+    color: '#ffffff',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  durationBadgeText: {
     fontSize: 11,
+    fontWeight: '700',
   },
-  pickButton: {
+  previewTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  previewArtist: {
+    fontSize: 12,
+  },
+  orDividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginVertical: 12,
+  },
+  orDividerLine: {
+    flex: 1,
+    height: 1,
+  },
+  orDividerText: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+  },
+  filePickButton: {
     borderWidth: 1.5,
     borderStyle: 'dashed',
-    borderRadius: 16,
-    padding: 22,
+    borderRadius: 14,
+    padding: 14,
     marginBottom: 16,
   },
-  pickedFileCard: {
+  filePickedCard: {
     borderStyle: 'solid',
-    borderColor: '#22c55e',
   },
-  pickPrompt: {
-    alignItems: 'center',
-    gap: 8,
-  },
-  pickPromptText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  pickPromptSub: {
-    fontSize: 12,
-  },
-  pickedFileInfo: {
+  filePromptRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    justifyContent: 'center',
+    gap: 8,
   },
-  pickedFileName: {
-    fontSize: 14,
+  filePromptText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  fileInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  fileInfoName: {
+    fontSize: 13,
     fontWeight: '700',
   },
-  pickedFileSize: {
-    fontSize: 12,
-    marginTop: 2,
+  fileInfoSize: {
+    fontSize: 11,
+    marginTop: 1,
   },
   progressBox: {
     flexDirection: 'row',
@@ -658,7 +701,6 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 6,
     gap: 8,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,

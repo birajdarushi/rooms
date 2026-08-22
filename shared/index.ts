@@ -182,6 +182,29 @@ export interface AddYouTubeSongRequest {
   artist?: string;
 }
 
+export interface SpotifyInfoRequest {
+  url: string;
+}
+
+export interface SpotifyTrackInfo {
+  title: string;
+  artist: string;
+  duration: number;
+  thumbnail: string;
+  spotifyUrl: string;
+  source: 'spotify';
+}
+
+export interface SpotifyInfoResponse {
+  info: SpotifyTrackInfo;
+}
+
+export interface AddSpotifySongRequest {
+  url: string;
+  title?: string;
+  artist?: string;
+}
+
 // Socket Events enum
 export enum SocketEvents {
   // Clock sync
