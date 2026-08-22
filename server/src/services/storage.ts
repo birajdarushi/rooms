@@ -1,28 +1,34 @@
-import { S3Client, PutObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import fs from 'fs';
 import path from 'path';
+import fs from 'fs';
+import {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectsCommand,
+  ListObjectsV2Command,
+} from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { config } from '../config/env';
+import { prisma } from '../db/prisma';
 
 export class StorageService {
   private s3Client: S3Client | null = null;
 
   constructor() {
-    if (config.storage.provider === 's3' || config.storage.provider === 'r2') {
+    if (config.storage.provider !== 'local' && config.storage.accessKeyId) {
       this.s3Client = new S3Client({
         region: config.storage.region,
         credentials: {
           accessKeyId: config.storage.accessKeyId,
           secretAccessKey: config.storage.secretAccessKey,
         },
-        endpoint: config.storage.endpoint || undefined,
-        forcePathStyle: !!config.storage.endpoint, // Needed for Cloudflare R2 / MinIO
+        endpoint: config.storage.endpoint,
+        forcePathStyle: !!config.storage.endpoint,
       });
-    } else {
-      // Ensure local upload directory exists
-      if (!fs.existsSync(config.storage.localUploadDir)) {
-        fs.mkdirSync(config.storage.localUploadDir, { recursive: true });
-      }
+    }
+
+    // Ensure local directory structure exists
+    if (!fs.existsSync(config.storage.localUploadDir)) {
+      fs.mkdirSync(config.storage.localUploadDir, { recursive: true });
     }
   }
 
@@ -32,8 +38,9 @@ export class StorageService {
     contentType: string,
     baseUrl: string
   ): Promise<{ uploadUrl: string; storageKey: string; publicUrl: string }> {
+    const timestamp = Date.now();
     const cleanFilename = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const storageKey = `rooms/${roomId}/${Date.now()}_${cleanFilename}`;
+    const storageKey = `rooms/${roomId}/${timestamp}_${cleanFilename}`;
 
     if (this.s3Client && config.storage.bucket) {
       const command = new PutObjectCommand({
@@ -42,12 +49,15 @@ export class StorageService {
         ContentType: contentType,
       });
 
-      const uploadUrl = await getSignedUrl(this.s3Client, command, { expiresIn: 3600 });
-      let publicUrl = `https://${config.storage.bucket}.s3.${config.storage.region}.amazonaws.com/${storageKey}`;
+      const uploadUrl = await getSignedUrl(this.s3Client, command, { expiresIn: 900 });
+
+      let publicUrl: string;
       if (config.storage.publicUrl) {
         publicUrl = `${config.storage.publicUrl.replace(/\/$/, '')}/${storageKey}`;
       } else if (config.storage.endpoint) {
         publicUrl = `${config.storage.endpoint.replace(/\/$/, '')}/${config.storage.bucket}/${storageKey}`;
+      } else {
+        publicUrl = `https://${config.storage.bucket}.s3.${config.storage.region}.amazonaws.com/${storageKey}`;
       }
 
       return { uploadUrl, storageKey, publicUrl };
@@ -66,7 +76,7 @@ export class StorageService {
   }
 
   async deleteRoomAudioFiles(roomId: string, specificKeys: string[] = []): Promise<void> {
-    console.log(`[StorageService] Purging audio files for room: ${roomId}`);
+    console.log(`[StorageService] 🗑️ Purging ephemeral audio files for room: ${roomId}`);
 
     if (this.s3Client && config.storage.bucket) {
       try {
@@ -104,6 +114,28 @@ export class StorageService {
       }
     } catch (err) {
       console.error(`[StorageService] Error deleting local room folder:`, err);
+    }
+  }
+
+  /**
+   * Automated janitor: Cleans up any orphaned directories and older ended room data.
+   */
+  async runOrphanedDataCleanupSweep(): Promise<void> {
+    try {
+      const roomsDir = path.join(config.storage.localUploadDir, 'rooms');
+      if (!fs.existsSync(roomsDir)) return;
+
+      const entries = fs.readdirSync(roomsDir);
+      for (const roomId of entries) {
+        const room = await prisma.room.findUnique({ where: { id: roomId } });
+        if (!room || room.status === 'ended') {
+          const folderPath = path.join(roomsDir, roomId);
+          fs.rmSync(folderPath, { recursive: true, force: true });
+          console.log(`[StorageJanitor] Purged orphaned audio folder for ended room: ${roomId}`);
+        }
+      }
+    } catch (err) {
+      console.warn(`[StorageJanitor] Error running cleanup sweep:`, err);
     }
   }
 }

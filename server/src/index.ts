@@ -9,6 +9,7 @@ import { storageRouter } from './routes/storage';
 import { youtubeRouter } from './routes/youtube';
 import { registerRoomLifecycle } from './sockets/roomLifecycle';
 import { registerSyncAndPlaybackHandlers, setSocketServer } from './sockets/syncHandler';
+import { storageService } from './services/storage';
 import { prisma } from './db/prisma';
 
 const app = express();
@@ -89,4 +90,12 @@ server.listen(config.port, '0.0.0.0', () => {
   console.log(`📡 Local server: http://localhost:${config.port}`);
   console.log(`💾 Storage Provider: ${config.storage.provider}`);
   console.log(`=============================================`);
+
+  // Run startup janitor sweep to delete orphaned audio from prior server runs
+  storageService.runOrphanedDataCleanupSweep().catch(() => {});
+
+  // Run hourly background sweep
+  setInterval(() => {
+    storageService.runOrphanedDataCleanupSweep().catch(() => {});
+  }, 60 * 60 * 1000);
 });
