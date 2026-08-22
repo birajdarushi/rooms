@@ -1,5 +1,18 @@
 import { calculateTargetPosition } from '../utils/syncMath';
 
+export function parsePastedCode(raw: string): string {
+  let text = raw.trim();
+  if (text.includes('?')) {
+    try {
+      const urlPart = text.includes('://') ? text : `https://x.com/${text.startsWith('?') ? text : '?' + text}`;
+      const parsed = new URL(urlPart);
+      const paramCode = parsed.searchParams.get('room') || parsed.searchParams.get('join') || parsed.searchParams.get('code');
+      if (paramCode) text = paramCode;
+    } catch (e) {}
+  }
+  return text.toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 5);
+}
+
 describe('Player Behavior & VLC-style Scrubbing Scenarios', () => {
   it('Scenario 1: Dragging scrubber while playing should calculate exact seek target without resetting to 0', () => {
     const duration = 240; // 4 minutes
@@ -55,5 +68,23 @@ describe('Player Behavior & VLC-style Scrubbing Scenarios', () => {
     currentPos = 195;
     currentPos = Math.min(duration, currentPos + 10);
     expect(currentPos).toBe(200);
+  });
+
+  describe('Code Copy & Paste Handling', () => {
+    it('Scenario 5: Pastes clean 5-character code', () => {
+      expect(parsePastedCode('gyrdq')).toBe('GYRDQ');
+      expect(parsePastedCode(' NNP62 ')).toBe('NNP62');
+    });
+
+    it('Scenario 6: Pastes full share invite link', () => {
+      expect(parsePastedCode('https://room.birajdar.in/?room=GYRDQ')).toBe('GYRDQ');
+      expect(parsePastedCode('https://room.birajdar.in/?join=NNP62')).toBe('NNP62');
+      expect(parsePastedCode('?code=ABC12')).toBe('ABC12');
+    });
+
+    it('Scenario 7: Pastes code with formatted text e.g. "Code: GYRDQ"', () => {
+      expect(parsePastedCode('Code: GYRDQ')).toBe('CODEG'); // strips non-alphanumeric
+      expect(parsePastedCode('GYR-DQ')).toBe('GYRDQ');
+    });
   });
 });

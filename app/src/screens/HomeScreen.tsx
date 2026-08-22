@@ -11,7 +11,7 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
-import { ArrowRight, Settings, Headphones, Radio, Users } from 'lucide-react-native';
+import { ArrowRight, Settings, Headphones, Radio, Users, ClipboardPaste } from 'lucide-react-native';
 import { api, setApiBaseUrl, getApiBaseUrl } from '../api/client';
 import { Room, UserSession } from '../types';
 import { saveSession } from '../services/SessionStorage';
@@ -42,6 +42,32 @@ export const HomeScreen: React.FC<Props> = ({ onEnterRoom }) => {
     useRef<TextInput>(null),
   ];
 
+  const populateCode = (raw: string) => {
+    let text = raw.trim();
+    // If a full invite link or query parameter is pasted
+    if (text.includes('?')) {
+      try {
+        const urlPart = text.includes('://') ? text : `https://x.com/${text.startsWith('?') ? text : '?' + text}`;
+        const parsed = new URL(urlPart);
+        const paramCode = parsed.searchParams.get('room') || parsed.searchParams.get('join') || parsed.searchParams.get('code');
+        if (paramCode) text = paramCode;
+      } catch (e) {}
+    }
+
+    const clean = text.toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 5);
+    const newDigits = ['', '', '', '', ''];
+    for (let i = 0; i < clean.length; i++) {
+      newDigits[i] = clean[i];
+    }
+    setDigits(newDigits);
+    setRoomCode(clean);
+
+    if (clean.length > 0) {
+      const focusIndex = Math.min(4, clean.length);
+      digitInputRefs[focusIndex].current?.focus();
+    }
+  };
+
   // Auto-detect invite link with ?room=CODE or ?join=CODE
   React.useEffect(() => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -53,13 +79,7 @@ export const HomeScreen: React.FC<Props> = ({ onEnterRoom }) => {
           if (clean.length > 0) {
             setInviteCode(clean);
             setActiveTab('join');
-            setRoomCode(clean);
-            const chars = clean.split('');
-            const newDigits = ['', '', '', '', ''];
-            chars.forEach((c, idx) => {
-              if (idx < 5) newDigits[idx] = c;
-            });
-            setDigits(newDigits);
+            populateCode(clean);
           }
         }
       } catch (e) {
@@ -74,10 +94,27 @@ export const HomeScreen: React.FC<Props> = ({ onEnterRoom }) => {
     }, 200);
   };
 
+  const handlePasteClipboard = async () => {
+    try {
+      if (Platform.OS === 'web' && typeof navigator !== 'undefined' && (navigator as any).clipboard?.readText) {
+        const text = await (navigator as any).clipboard.readText();
+        if (text) populateCode(text);
+      }
+    } catch (e) {
+      console.warn('Clipboard read failed:', e);
+    }
+  };
+
   const handleDigitChange = (val: string, index: number) => {
+    // If user pasted multi-character code or full URL into a box
+    if (val.length > 1) {
+      populateCode(val);
+      return;
+    }
+
     const clean = val.toUpperCase().replace(/[^0-9A-Z]/g, '');
     const newDigits = [...digits];
-    newDigits[index] = clean.slice(-1);
+    newDigits[index] = clean;
     setDigits(newDigits);
     const fullCode = newDigits.join('');
     setRoomCode(fullCode);
@@ -239,7 +276,15 @@ export const HomeScreen: React.FC<Props> = ({ onEnterRoom }) => {
 
             {activeTab === 'join' && (
               <View style={styles.formGroup}>
-                <Text style={[styles.inputLabel, { color: theme.textSecondary }]}>5-Character Room Code</Text>
+                <View style={styles.inputLabelRow}>
+                  <Text style={[styles.inputLabel, { color: theme.textSecondary, marginBottom: 0 }]}>5-Character Room Code</Text>
+                  {Platform.OS === 'web' && (
+                    <TouchableOpacity onPress={handlePasteClipboard} style={[styles.pasteBtn, { backgroundColor: theme.elevatedBg }]} activeOpacity={0.7}>
+                      <ClipboardPaste size={12} color={theme.accent} />
+                      <Text style={[styles.pasteBtnText, { color: theme.accent }]}>Paste</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
                 <View style={styles.digitRow}>
                   {digits.map((digit, idx) => (
                     <TextInput
@@ -254,7 +299,7 @@ export const HomeScreen: React.FC<Props> = ({ onEnterRoom }) => {
                       onChangeText={(val) => handleDigitChange(val, idx)}
                       onKeyPress={(e) => handleDigitKeyPress(e, idx)}
                       onFocus={handleInputFocus}
-                      maxLength={1}
+                      maxLength={100}
                       autoCapitalize="characters"
                       placeholder="•"
                       placeholderTextColor={theme.textMuted}
@@ -413,12 +458,30 @@ const styles = StyleSheet.create({
   formGroup: {
     marginBottom: 14,
   },
+  inputLabelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
   inputLabel: {
     fontSize: 11,
     fontWeight: '600',
     marginBottom: 6,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+  },
+  pasteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  pasteBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
   input: {
     borderRadius: 12,

@@ -406,10 +406,10 @@ export const NowPlayingCard: React.FC<Props> = ({
       {/* 3. Progress Scrubber with Smooth Dragging */}
       <View
         style={[styles.progressWrap, isDesktop && { marginVertical: 6 }]}
-        {...(isHost ? panResponder.panHandlers : {})}
+        {...(Platform.OS !== 'web' && isHost ? panResponder.panHandlers : {})}
         onLayout={(e) => setBarWidth(e.nativeEvent.layout.width)}
       >
-        <View style={[styles.progressBar, { backgroundColor: theme.scrubberTrack }]}>
+        <View style={[styles.progressBar, { backgroundColor: theme.scrubberTrack, position: 'relative' }]}>
           <View
             style={[
               styles.progressFill,
@@ -431,6 +431,49 @@ export const NowPlayingCard: React.FC<Props> = ({
               ]}
             />
           </View>
+
+          {/* Web Native Invisible Overlay Slider for 100% Reliable Dragging & Seeking */}
+          {Platform.OS === 'web' && isHost && (
+            <input
+              type="range"
+              min={0}
+              max={duration > 0 ? duration : 1}
+              step={0.1}
+              value={currentDisplayPosition}
+              onMouseDown={() => setIsDragging(true)}
+              onTouchStart={() => setIsDragging(true)}
+              onChange={(e: any) => {
+                const val = parseFloat(e.target.value);
+                setDragPosition(val);
+              }}
+              onMouseUp={async (e: any) => {
+                const val = parseFloat(e.target.value);
+                setIsDragging(false);
+                setPosition(val);
+                await audioEngine.seekTo(val);
+                onSeek(val);
+              }}
+              onTouchEnd={async (e: any) => {
+                const val = parseFloat(e.target.value);
+                setIsDragging(false);
+                setPosition(val);
+                await audioEngine.seekTo(val);
+                onSeek(val);
+              }}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                opacity: 0,
+                cursor: 'pointer',
+                zIndex: 10,
+                margin: 0,
+                padding: 0,
+              }}
+            />
+          )}
         </View>
 
         <View style={[styles.timeRow, isDesktop && { marginTop: 4 }]}>

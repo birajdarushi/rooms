@@ -214,11 +214,16 @@ export class AudioEngine {
     this.isPlaying = false;
     if (this.isWeb && this.htmlAudio) {
       this.htmlAudio.pause();
+      this.notifyStatus(this.htmlAudio.currentTime || 0);
       return;
     }
 
     if (this.soundObject) {
       await this.soundObject.pauseAsync();
+      const status = await this.soundObject.getStatusAsync();
+      if (status.isLoaded) {
+        this.notifyStatus((status.positionMillis || 0) / 1000);
+      }
     }
   }
 
@@ -226,10 +231,15 @@ export class AudioEngine {
     const safeSec = Math.max(0, seconds);
 
     if (this.isWeb && this.htmlAudio) {
-      if (Math.abs((this.htmlAudio.currentTime || 0) - safeSec) > 0.05) {
+      if (Math.abs((this.htmlAudio.currentTime || 0) - safeSec) > 0.04) {
         this.htmlAudio.currentTime = safeSec;
       }
       this.notifyStatus(safeSec);
+      if (this.isPlaying && this.htmlAudio.paused) {
+        try {
+          await this.htmlAudio.play();
+        } catch (e) {}
+      }
       return;
     }
 
