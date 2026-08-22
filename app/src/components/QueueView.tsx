@@ -72,7 +72,7 @@ export const QueueView: React.FC<Props> = ({
           <Music size={44} color={theme.textMuted} />
           <Text style={[styles.emptyTitle, { color: theme.textPrimary }]}>Queue is empty</Text>
           <Text style={[styles.emptySub, { color: theme.textSecondary }]}>
-            {isHost ? 'Add your favorite MP3 / audio tracks to start the listening party.' : 'Waiting for host to add tracks.'}
+            {isHost ? 'Add your favorite songs from YouTube or local audio files to start the listening party.' : 'Waiting for host to add tracks.'}
           </Text>
           {isHost && (
             <TouchableOpacity
@@ -81,7 +81,7 @@ export const QueueView: React.FC<Props> = ({
               activeOpacity={0.85}
             >
               <Plus size={18} color="#ffffff" />
-              <Text style={styles.emptyAddBtnText}>Upload Audio Files</Text>
+              <Text style={styles.emptyAddBtnText}>Add Tracks or YouTube Links</Text>
             </TouchableOpacity>
           )}
         </View>

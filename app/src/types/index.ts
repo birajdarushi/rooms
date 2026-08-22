@@ -160,6 +160,28 @@ export interface AddSongRequest {
   duration: number;
 }
 
+export interface YouTubeInfoRequest {
+  url: string;
+}
+
+export interface YouTubeVideoInfo {
+  title: string;
+  artist: string;
+  duration: number;
+  thumbnail: string;
+  youtubeUrl: string;
+}
+
+export interface YouTubeInfoResponse {
+  info: YouTubeVideoInfo;
+}
+
+export interface AddYouTubeSongRequest {
+  url: string;
+  title?: string;
+  artist?: string;
+}
+
 // Socket Events enum
 export enum SocketEvents {
   // Clock sync

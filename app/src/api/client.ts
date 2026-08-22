@@ -212,4 +212,40 @@ export const api = {
   async addSong(roomId: string, req: AddSongRequest): Promise<{ song: Song; queueItem: QueueItem }> {
     return this.registerSong(roomId, req);
   },
+
+  async getYoutubeInfo(url: string): Promise<any> {
+    const res = await fetch(`${apiBaseUrl}/api/youtube/info`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to fetch YouTube info');
+    }
+    const data = await res.json();
+    return data.info;
+  },
+
+  async addYoutubeSong(
+    roomId: string,
+    data: { url: string; title?: string; artist?: string; uploaderId?: string }
+  ): Promise<{ song: Song; queueItem: QueueItem }> {
+    const res = await fetch(`${apiBaseUrl}/api/youtube/queue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roomId,
+        url: data.url,
+        title: data.title,
+        artist: data.artist,
+        uploaderId: data.uploaderId || 'host',
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to add YouTube track to room queue');
+    }
+    return res.json();
+  },
 };

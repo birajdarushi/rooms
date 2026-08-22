@@ -6,6 +6,7 @@ import path from 'path';
 import { config } from './config/env';
 import { roomsRouter } from './routes/rooms';
 import { storageRouter } from './routes/storage';
+import { youtubeRouter } from './routes/youtube';
 import { registerRoomLifecycle } from './sockets/roomLifecycle';
 import { registerSyncAndPlaybackHandlers, setSocketServer } from './sockets/syncHandler';
 import { prisma } from './db/prisma';
@@ -40,6 +41,7 @@ app.get('/health', (req, res) => {
 // REST API routes
 app.use('/api/rooms', roomsRouter);
 app.use('/api/storage', storageRouter);
+app.use('/api/youtube', youtubeRouter);
 
 // Initialize Socket.io Server
 const io = new SocketIOServer(server, {
