@@ -36,37 +36,60 @@ export class LiveAudioStreamer {
   }
 
   /**
-   * 1. HOST: Start capturing live system/tab audio and setup WebRTC broadcaster
+   * 1. HOST: Start capturing live system/microphone audio and setup WebRTC broadcaster
    */
   public async startSystemAudioBroadcast(roomId: string, socket: any): Promise<boolean> {
-    if (Platform.OS !== 'web' || typeof navigator === 'undefined' || !navigator.mediaDevices?.getDisplayMedia) {
-      throw new Error('System audio capture is supported on desktop web browsers (Chrome, Edge, Brave, Opera).');
-    }
-
     try {
-      // Capture system audio / tab audio
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-          channelCount: 2,
-        } as any,
-      });
+      let stream: MediaStream | null = null;
+
+      // 1. Try Desktop Tab/System Audio Capture if supported
+      if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getDisplayMedia) {
+        try {
+          stream = await navigator.mediaDevices.getDisplayMedia({
+            video: true,
+            audio: {
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+              channelCount: 2,
+            } as any,
+          });
+        } catch (displayErr: any) {
+          console.warn('[LiveAudioStreamer] getDisplayMedia fallback to getUserMedia:', displayErr);
+        }
+      }
+
+      // 2. Fallback to Direct High-Definition Audio Capture (Works on Mobile + Desktop)
+      if (!stream || stream.getAudioTracks().length === 0) {
+        if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+              channelCount: 2,
+              sampleRate: 44100,
+            } as any,
+          });
+        }
+      }
+
+      if (!stream) {
+        throw new Error('Live audio capture is not supported or permission was denied on this device.');
+      }
 
       const audioTracks = stream.getAudioTracks();
       if (!audioTracks || audioTracks.length === 0) {
         stream.getTracks().forEach((t) => t.stop());
-        throw new Error('No audio track detected. Please make sure to check "Also share audio" in the browser popup.');
+        throw new Error('No audio track detected. Please allow audio access in your browser or device permissions.');
       }
 
       this.mediaStream = stream;
       this.isBroadcasting = true;
       this.hostPeerConnections.clear();
 
-      // When host stops screen sharing in browser UI
-      stream.getVideoTracks().forEach((track) => {
+      // When stream ends
+      stream.getTracks().forEach((track) => {
         track.onended = () => {
           this.stopBroadcast(roomId, socket);
         };
@@ -127,10 +150,10 @@ export class LiveAudioStreamer {
       // Notify room server that live broadcast started
       socket.emit(SocketEvents.STREAM_START, {
         roomId,
-        title: 'Live System Audio Broadcast',
+        title: 'Live Audio Broadcast',
       });
 
-      console.log('[LiveAudioStreamer] 🎙️ Live System Audio Broadcast active with WebRTC + HTTP stream relay!');
+      console.log('[LiveAudioStreamer] 🎙️ Live Audio Broadcast active on Mobile & Desktop!');
       return true;
     } catch (err: any) {
       console.error('[LiveAudioStreamer] Error capturing audio:', err);
