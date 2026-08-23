@@ -188,10 +188,14 @@ async function handleSocketDisconnectOrLeave(io: Server, socket: Socket, explici
       const graceDurationMs = 25000;
       session.gracePeriodEndsAt = Date.now() + graceDurationMs;
 
-      await prisma.room.update({
-        where: { id: session.roomId },
-        data: { status: 'grace_period' },
-      });
+      try {
+        await prisma.room.update({
+          where: { id: session.roomId },
+          data: { status: 'grace_period' },
+        });
+      } catch (e) {
+        console.warn(`[Lifecycle] Room update ignored for missing room: ${session.roomId}`);
+      }
 
       const hostStatus: HostStatusPayload = {
         isHostConnected: false,

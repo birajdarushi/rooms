@@ -15,10 +15,19 @@ import { registerStreamHandlers } from './sockets/streamHandler';
 import { storageService } from './services/storage';
 import { prisma } from './db/prisma';
 
+// 🛡️ GLOBAL PROCESS ARMOR: Prevent Node server from ever dying or crashing from unhandled errors
+process.on('uncaughtException', (err: any) => {
+  console.error('🛡️ [Server Armor] Intercepted uncaughtException (prevented server crash):', err?.message || err);
+});
+
+process.on('unhandledRejection', (reason: any) => {
+  console.error('🛡️ [Server Armor] Intercepted unhandledRejection (prevented server crash):', reason?.message || reason);
+});
+
 const app = express();
 const server = http.createServer(app);
 
-// Enable CORS for all local and mobile network clients
+// Enable CORS for all local, production, and mobile network clients
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 
@@ -50,6 +59,14 @@ app.use('/api/youtube', youtubeRouter);
 app.use('/api/spotify', spotifyRouter);
 app.use('/api/stream', streamRouter);
 
+// Global Express error handler
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('🛡️ [Express Error Handler]:', err?.message || err);
+  if (!res.headersSent) {
+    res.status(500).json({ error: err?.message || 'Internal server error' });
+  }
+});
+
 // Initialize Socket.io Server
 const io = new SocketIOServer(server, {
   cors: {
@@ -65,10 +82,14 @@ setSocketServer(io);
 io.on('connection', (socket) => {
   console.log(`[Socket] Client connected: ${socket.id}`);
 
-  // Register handlers
-  registerRoomLifecycle(io, socket);
-  registerSyncAndPlaybackHandlers(io, socket);
-  registerStreamHandlers(io, socket);
+  // Register handlers safely
+  try {
+    registerRoomLifecycle(io, socket);
+    registerSyncAndPlaybackHandlers(io, socket);
+    registerStreamHandlers(io, socket);
+  } catch (err) {
+    console.error('[Socket] Error attaching handlers:', err);
+  }
 });
 
 // Fast clean shutdown handlers to prevent EADDRINUSE during hot reloads
@@ -81,7 +102,6 @@ const cleanShutdown = async (signal: string) => {
       console.log('[Server] HTTP and Socket server closed');
       process.exit(0);
     });
-    // Fallback exit if sockets take longer than 800ms
     setTimeout(() => process.exit(0), 800);
   } catch (_) {
     process.exit(0);

@@ -23,7 +23,9 @@ function getOrCreateStreamSession(roomId: string): StreamSession {
         '-flags', 'low_delay',
         '-probesize', '32',
         '-analyzeduration', '0',
-        '-f', 'webm',
+        '-f', 's16le',
+        '-ar', '44100',
+        '-ac', '2',
         '-i', 'pipe:0',
         '-f', 'mp3',
         '-acodec', 'libmp3lame',
@@ -56,6 +58,16 @@ function getOrCreateStreamSession(roomId: string): StreamSession {
             session.subscribers.delete(res);
           }
         }
+      });
+
+      ffmpegProc.stdin.on('error', (err: any) => {
+        if (err?.code !== 'EPIPE') {
+          console.warn(`[StreamTranscoder stdin ${roomId}]`, err?.message || err);
+        }
+      });
+
+      ffmpegProc.on('error', (err) => {
+        console.warn(`[StreamTranscoder process error ${roomId}]`, err?.message || err);
       });
 
       ffmpegProc.stderr.on('data', (err) => {

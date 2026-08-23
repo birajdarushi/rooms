@@ -78,38 +78,50 @@ export class LiveAudioStreamer {
       // Bind Host WebRTC socket signaling
       this.bindHostSocketSignaling(roomId, socket, stream);
 
-      // Start continuous media chunk recording for HTTP stream relay (supports Android native & Web)
+      // Stream raw 16-bit PCM stereo (44.1kHz) directly to server for instant zero-error MP3 transcode
       try {
-        if (typeof MediaRecorder !== 'undefined') {
-          const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-            ? 'audio/webm;codecs=opus'
-            : (MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4');
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          const pcmCtx = new AudioCtx({ sampleRate: 44100 });
+          const pcmSource = pcmCtx.createMediaStreamSource(stream);
+          const pcmProcessor = pcmCtx.createScriptProcessor(4096, 2, 2);
 
-          const recorder = new MediaRecorder(new MediaStream(audioTracks), {
-            mimeType,
-            audioBitsPerSecond: 128000,
-          });
+          pcmSource.connect(pcmProcessor);
+          pcmProcessor.connect(pcmCtx.destination);
 
-          recorder.ondataavailable = (e) => {
-            if (e.data && e.data.size > 0 && this.isBroadcasting) {
-              const reader = new FileReader();
-              reader.onloadend = () => {
-                const base64 = reader.result as string;
-                socket.emit(SocketEvents.STREAM_CHUNK, {
-                  roomId,
-                  chunk: base64,
-                  timestamp: Date.now(),
-                });
-              };
-              reader.readAsDataURL(e.data);
+          pcmProcessor.onaudioprocess = (e) => {
+            if (!this.isBroadcasting) return;
+            const left = e.inputBuffer.getChannelData(0);
+            const right = e.inputBuffer.getChannelData(1);
+
+            const buffer = new ArrayBuffer(left.length * 4);
+            const view = new DataView(buffer);
+            for (let i = 0; i < left.length; i++) {
+              const sLeft = Math.max(-1, Math.min(1, left[i]));
+              const sRight = Math.max(-1, Math.min(1, right[i]));
+              view.setInt16(i * 4, sLeft < 0 ? sLeft * 0x8000 : sLeft * 0x7FFF, true);
+              view.setInt16(i * 4 + 2, sRight < 0 ? sRight * 0x8000 : sRight * 0x7FFF, true);
             }
+
+            const bytes = new Uint8Array(buffer);
+            let binary = '';
+            for (let i = 0; i < bytes.byteLength; i++) {
+              binary += String.fromCharCode(bytes[i]);
+            }
+            const base64Chunk = btoa(binary);
+
+            socket.emit(SocketEvents.STREAM_CHUNK, {
+              roomId,
+              chunk: base64Chunk,
+              timestamp: Date.now(),
+            });
           };
 
-          recorder.start(250);
-          this.mediaRecorder = recorder;
+          this.pcmAudioContext = pcmCtx;
+          this.pcmProcessorNode = pcmProcessor;
         }
-      } catch (recErr) {
-        console.warn('[LiveAudioStreamer] MediaRecorder init error:', recErr);
+      } catch (pcmErr) {
+        console.warn('[LiveAudioStreamer] PCM Streamer init error:', pcmErr);
       }
 
       // Notify room server that live broadcast started
@@ -395,9 +407,16 @@ export class LiveAudioStreamer {
       this.mediaStream = null;
     }
 
-    if (this.audioContext) {
-      this.audioContext.close().catch(() => {});
-      this.audioContext = null;
+    if (this.pcmProcessorNode) {
+      try {
+        this.pcmProcessorNode.disconnect();
+      } catch (e) {}
+      this.pcmProcessorNode = null;
+    }
+
+    if (this.pcmAudioContext) {
+      this.pcmAudioContext.close().catch(() => {});
+      this.pcmAudioContext = null;
     }
 
     if (socket) {
