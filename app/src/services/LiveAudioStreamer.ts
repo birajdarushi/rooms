@@ -299,20 +299,23 @@ export class LiveAudioStreamer {
         audioEl.id = 'room-live-stream-audio';
         audioEl.autoplay = true;
         (audioEl as any).playsInline = true;
+        (audioEl as any).webkitPlaysInline = true;
         audioEl.style.display = 'none';
         document.body.appendChild(audioEl);
       }
 
       audioEl.srcObject = stream;
+      audioEl.muted = false;
       audioEl.volume = 1.0;
-      audioEl.play().catch((err) => {
-        console.warn('[LiveAudioStreamer] Autoplay was blocked, requiring user interaction:', err);
-      });
+      
+      const playPromise = audioEl.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          console.warn('[LiveAudioStreamer] Mobile autoplay policy: tap Tune In to unmute:', err);
+        });
+      }
 
       this.listenerAudioElement = audioEl;
-
-      // Analyze listener audio level for VU meter
-      this.initAudioAnalyzer(stream);
     } catch (e) {
       console.error('[LiveAudioStreamer] Error playing incoming audio:', e);
     }
@@ -325,10 +328,8 @@ export class LiveAudioStreamer {
     try {
       if (this.listenerAudioElement) {
         this.listenerAudioElement.muted = false;
+        this.listenerAudioElement.volume = 1.0;
         this.listenerAudioElement.play().catch(console.warn);
-      }
-      if (this.audioContext && this.audioContext.state === 'suspended') {
-        this.audioContext.resume().catch(console.warn);
       }
     } catch (e) {
       console.warn('[LiveAudioStreamer] Unmute error:', e);
