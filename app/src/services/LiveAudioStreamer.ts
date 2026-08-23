@@ -59,18 +59,26 @@ export class LiveAudioStreamer {
         }
       }
 
-      // 2. Fallback to Direct High-Definition Audio Capture (Works on Mobile + Desktop)
+      // 2. Fallback to Direct Audio Capture (Works on all Mobile + Desktop browsers)
       if (!stream || stream.getAudioTracks().length === 0) {
         if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
-          stream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-              echoCancellation: false,
-              noiseSuppression: false,
-              autoGainControl: false,
-              channelCount: 2,
-              sampleRate: 44100,
-            } as any,
-          });
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              audio: {
+                echoCancellation: false,
+                noiseSuppression: false,
+                autoGainControl: false,
+              } as any,
+            });
+          } catch (constraintErr) {
+            // Universal mobile fallback (satisfies all mobile hardware)
+            try {
+              stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            } catch (permErr: any) {
+              console.error('[LiveAudioStreamer] getUserMedia permission error:', permErr);
+              throw new Error('Microphone/Audio permission was denied. Please allow microphone access in your browser settings.');
+            }
+          }
         }
       }
 
