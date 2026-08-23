@@ -19,6 +19,10 @@ function getOrCreateStreamSession(roomId: string): StreamSession {
     try {
       ffmpegProc = spawn('ffmpeg', [
         '-loglevel', 'error',
+        '-fflags', '+nobuffer+flush_packets',
+        '-flags', 'low_delay',
+        '-probesize', '32',
+        '-analyzeduration', '0',
         '-f', 'webm',
         '-i', 'pipe:0',
         '-f', 'mp3',
@@ -26,6 +30,9 @@ function getOrCreateStreamSession(roomId: string): StreamSession {
         '-b:a', '128k',
         '-ar', '44100',
         '-ac', '2',
+        '-flush_packets', '1',
+        '-write_xing', '0',
+        '-id3v2_version', '0',
         'pipe:1',
       ]);
 
