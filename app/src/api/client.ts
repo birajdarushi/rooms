@@ -11,7 +11,7 @@ import {
 } from '../types';
 
 const FALLBACK_LAN_IP = '192.168.31.249';
-const PRODUCTION_TUNNEL_URL = 'https://ken-regarded-ready-florida.trycloudflare.com';
+const PRODUCTION_TUNNEL_URL = 'https://api-room.birajdar.in';
 
 /**
  * Auto-detect the backend URL for physical mobile devices (Expo Go / browser)
