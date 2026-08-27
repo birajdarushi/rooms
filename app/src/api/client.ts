@@ -11,7 +11,7 @@ import {
 } from '../types';
 
 const FALLBACK_LAN_IP = '192.168.31.249';
-const PRODUCTION_API_URL = 'https://server-lilac-beta-70.vercel.app';
+const PRODUCTION_API_URL = 'https://api-room.birajdar.in';
 
 /**
  * Auto-detect the backend URL for physical mobile devices (Expo Go / browser)
