@@ -11,7 +11,7 @@ import {
 } from '../types';
 
 const FALLBACK_LAN_IP = '192.168.31.249';
-const PRODUCTION_TUNNEL_URL = 'https://api-room.birajdar.in';
+const PRODUCTION_API_URL = 'https://server-lilac-beta-70.vercel.app';
 
 /**
  * Auto-detect the backend URL for physical mobile devices (Expo Go / browser)
@@ -27,7 +27,7 @@ function detectApiBaseUrl(): string {
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
     const hostname = window.location.hostname;
     if (hostname.includes('birajdar.in') || hostname.includes('pages.dev') || hostname.includes('vercel.app')) {
-      return PRODUCTION_TUNNEL_URL;
+      return PRODUCTION_API_URL;
     }
     if (hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
       return `http://${hostname}:4000`;
