@@ -2,7 +2,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs';
-import { YouTubeVideoInfo } from '../../../shared';
+import { YouTubeVideoInfo } from '../shared';
 
 const execFileAsync = promisify(execFile);
 

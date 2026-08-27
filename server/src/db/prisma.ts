@@ -1,7 +1,15 @@
 import { PrismaClient } from '@prisma/client';
-import { Room, Song, QueueItem } from '../../../shared';
+import { Room, Song, QueueItem } from '../shared';
 
-export const prisma = new PrismaClient();
+const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
+
+export const prisma =
+  globalForPrisma.prisma ??
+  new PrismaClient({
+    log: ['error'],
+  });
+
+if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
 
 // Helper to convert Prisma Room model (with BigInt startedAt) into shared Room interface
 export function formatRoom(room: any): Room {

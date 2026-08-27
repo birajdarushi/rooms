@@ -111,18 +111,23 @@ const cleanShutdown = async (signal: string) => {
 process.on('SIGTERM', () => cleanShutdown('SIGTERM'));
 process.on('SIGINT', () => cleanShutdown('SIGINT'));
 
-server.listen(config.port, '0.0.0.0', () => {
-  console.log(`=============================================`);
-  console.log(`🎵 Room Backend running on port ${config.port}`);
-  console.log(`📡 Local server: http://localhost:${config.port}`);
-  console.log(`💾 Storage Provider: ${config.storage.provider}`);
-  console.log(`=============================================`);
+if (!process.env.VERCEL) {
+  server.listen(config.port, '0.0.0.0', () => {
+    console.log(`=============================================`);
+    console.log(`🎵 Room Backend running on port ${config.port}`);
+    console.log(`📡 Local server: http://localhost:${config.port}`);
+    console.log(`💾 Storage Provider: ${config.storage.provider}`);
+    console.log(`=============================================`);
 
-  // Run startup janitor sweep to delete orphaned audio from prior server runs
-  storageService.runOrphanedDataCleanupSweep().catch(() => {});
-
-  // Run hourly background sweep
-  setInterval(() => {
+    // Run startup janitor sweep to delete orphaned audio from prior server runs
     storageService.runOrphanedDataCleanupSweep().catch(() => {});
-  }, 60 * 60 * 1000);
-});
+
+    // Run hourly background sweep
+    setInterval(() => {
+      storageService.runOrphanedDataCleanupSweep().catch(() => {});
+    }, 60 * 60 * 1000);
+  });
+}
+
+export default app;
+export { app, server, io };

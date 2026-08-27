@@ -4,7 +4,7 @@ import { prisma, formatSong, formatQueueItem } from '../db/prisma';
 import { spotifyService, isValidSpotifyUrl } from '../services/spotify';
 import { config } from '../config/env';
 import { getSocketServer } from '../sockets/syncHandler';
-import { SocketEvents } from '../../../shared';
+import { SocketEvents } from '../shared';
 
 function getServerBaseUrl(req: Request): string {
   const proto = (req.headers['x-forwarded-proto'] as string) || (req.secure ? 'https' : 'http');

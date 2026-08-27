@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { nanoid, customAlphabet } from 'nanoid';
 import { prisma, formatRoom, formatSong, formatQueueItem } from '../db/prisma';
 import { config } from '../config/env';
-import { CreateRoomResponse, JoinRoomResponse, RoomState } from '../../../shared';
+import { CreateRoomResponse, JoinRoomResponse, RoomState } from '../shared';
 
 const generateRoomCode = customAlphabet('23456789ABCDEFGHJKLMNPQRSTUVWXYZ', 5);
 

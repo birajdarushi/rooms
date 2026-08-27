@@ -1,5 +1,5 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
-import { SocketEvents, StreamStartPayload, StreamOfferPayload, StreamAnswerPayload, StreamIceCandidatePayload, StreamChunkPayload } from '../../../shared';
+import { SocketEvents, StreamStartPayload, StreamOfferPayload, StreamAnswerPayload, StreamIceCandidatePayload, StreamChunkPayload } from '../shared';
 import { prisma } from '../db/prisma';
 import { broadcastAudioChunk, clearRoomStream } from '../routes/stream';
 

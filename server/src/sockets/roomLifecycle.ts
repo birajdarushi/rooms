@@ -2,7 +2,7 @@ import { Server, Socket } from 'socket.io';
 import { prisma, formatSong, formatQueueItem } from '../db/prisma';
 import { storageService } from '../services/storage';
 import { getActiveLiveStream } from './streamHandler';
-import { SocketEvents, HostStatusPayload, RoomEndedPayload } from '../../../shared';
+import { SocketEvents, HostStatusPayload, RoomEndedPayload } from '../shared';
 
 interface RoomSessionState {
   roomId: string;

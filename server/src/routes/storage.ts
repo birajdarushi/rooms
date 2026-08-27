@@ -7,7 +7,7 @@ import { prisma, formatSong, formatQueueItem } from '../db/prisma';
 import { storageService } from '../services/storage';
 import { config } from '../config/env';
 import { getSocketServer } from '../sockets/syncHandler';
-import { SocketEvents } from '../../../shared';
+import { SocketEvents } from '../shared';
 
 /**
  * Returns the base URL the server should use when building presigned upload

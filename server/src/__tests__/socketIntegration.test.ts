@@ -6,7 +6,7 @@ import { prisma } from '../db/prisma';
 import { registerRoomLifecycle } from '../sockets/roomLifecycle';
 import { registerSyncAndPlaybackHandlers, setSocketServer } from '../sockets/syncHandler';
 import { roomsRouter } from '../routes/rooms';
-import { SocketEvents, PlayPayload, PausePayload, SeekPayload } from '../../../shared';
+import { SocketEvents, PlayPayload, PausePayload, SeekPayload } from '../shared';
 
 describe('Integration: In-Process Socket.io Room Sync & Broadcasts', () => {
   let server: http.Server;

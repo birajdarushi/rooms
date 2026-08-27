@@ -8,7 +8,7 @@ import {
   PausePayload,
   SeekPayload,
   SongChangedPayload,
-} from '../../../shared';
+} from '../shared';
 
 let ioInstance: Server | null = null;
 
