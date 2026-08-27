@@ -1,6 +1,9 @@
 import express, { Request, Response } from 'express';
 import cors from 'cors';
-import { spawn } from 'child_process';
+import { spawn, exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -13,25 +16,6 @@ app.get('/health', (_req, res) => {
 });
 
 /**
- * Execute yt-dlp helper
- */
-function runYtDlp(args: string[]): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn('yt-dlp', args);
-    let stdout = '';
-    let stderr = '';
-
-    proc.stdout.on('data', (data) => (stdout += data.toString()));
-    proc.stderr.on('data', (data) => (stderr += data.toString()));
-
-    proc.on('close', (code) => {
-      if (code === 0) resolve(stdout.trim());
-      else reject(new Error(stderr.trim() || `yt-dlp exited with code ${code}`));
-    });
-  });
-}
-
-/**
  * POST /extract/youtube
  * Returns streamable audio URL and metadata
  */
@@ -40,23 +24,28 @@ app.post(['/extract/youtube', '/extract'], async (req: Request, res: Response) =
   if (!url) return res.status(400).json({ error: 'Missing url' });
 
   try {
-    const rawJson = await runYtDlp([
-      '-J',
-      '--no-playlist',
-      '--format',
-      'bestaudio/best',
-      url,
+    const streamUrlCmd = `yt-dlp -g -f "bestaudio/best" "${url}"`;
+    const metaCmd = `yt-dlp --no-playlist --print "%(title)s###%(uploader)s###%(duration)s###%(thumbnail)s" "${url}"`;
+
+    const [streamRes, metaRes] = await Promise.all([
+      execAsync(streamUrlCmd),
+      execAsync(metaCmd).catch(() => ({ stdout: '' })),
     ]);
 
-    const info = JSON.parse(rawJson);
-    const audioUrl = info.url || (info.formats && info.formats[0]?.url);
+    const streamUrl = streamRes.stdout.trim().split('\n')[0];
+    const metaParts = metaRes.stdout.trim().split('###');
+
+    const title = metaParts[0] || 'YouTube Track';
+    const artist = metaParts[1] || 'YouTube';
+    const duration = Math.round(Number(metaParts[2]) || 180);
+    const thumbnail = metaParts[3] || '';
 
     return res.json({
-      title: info.title,
-      artist: info.uploader || info.channel || 'Unknown Artist',
-      duration: Math.round(info.duration || 180),
-      thumbnail: info.thumbnail || '',
-      streamUrl: audioUrl,
+      title,
+      artist,
+      duration,
+      thumbnail,
+      streamUrl,
       source: 'youtube',
     });
   } catch (err: any) {
@@ -74,24 +63,28 @@ app.post('/extract/spotify', async (req: Request, res: Response) => {
   const searchQuery = `ytsearch1:${title || ''} ${artist || ''} audio`.trim();
 
   try {
-    const rawJson = await runYtDlp([
-      '-J',
-      '--no-playlist',
-      '--format',
-      'bestaudio/best',
-      searchQuery,
+    const streamUrlCmd = `yt-dlp -g -f "bestaudio/best" "${searchQuery}"`;
+    const metaCmd = `yt-dlp --no-playlist --print "%(title)s###%(uploader)s###%(duration)s###%(thumbnail)s" "${searchQuery}"`;
+
+    const [streamRes, metaRes] = await Promise.all([
+      execAsync(streamUrlCmd),
+      execAsync(metaCmd).catch(() => ({ stdout: '' })),
     ]);
 
-    const info = JSON.parse(rawJson);
-    const item = info.entries ? info.entries[0] : info;
-    const audioUrl = item?.url || (item?.formats && item?.formats[0]?.url);
+    const streamUrl = streamRes.stdout.trim().split('\n')[0];
+    const metaParts = metaRes.stdout.trim().split('###');
+
+    const trackTitle = title || metaParts[0] || 'Spotify Track';
+    const trackArtist = artist || metaParts[1] || 'Spotify Artist';
+    const duration = Math.round(Number(metaParts[2]) || 180);
+    const thumbnail = metaParts[3] || '';
 
     return res.json({
-      title: title || item?.title,
-      artist: artist || item?.uploader || 'Spotify Artist',
-      duration: Math.round(item?.duration || 180),
-      thumbnail: item?.thumbnail || '',
-      streamUrl: audioUrl,
+      title: trackTitle,
+      artist: trackArtist,
+      duration,
+      thumbnail,
+      streamUrl,
       source: 'spotify',
       spotifyUrl: url,
     });
@@ -103,7 +96,7 @@ app.post('/extract/spotify', async (req: Request, res: Response) => {
 
 /**
  * GET /stream/pipe
- * Direct HTTP Audio Pipe with Range & CORS support for seamless playback
+ * Direct HTTP Audio Pipe with Range & CORS support
  */
 app.get('/stream/pipe', (req: Request, res: Response) => {
   const targetUrl = req.query.url as string;
@@ -121,7 +114,6 @@ app.get('/stream/pipe', (req: Request, res: Response) => {
   ]);
 
   proc.stdout.pipe(res);
-
   proc.stderr.on('data', () => {});
   req.on('close', () => {
     proc.kill();
