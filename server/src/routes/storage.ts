@@ -230,3 +230,38 @@ const handleAddSong = async (req: Request, res: Response) => {
 storageRouter.post('/register-song', handleAddSong);
 storageRouter.post('/add-song', handleAddSong);
 storageRouter.post('/rooms/:id/songs', handleAddSong);
+
+// GET /rooms/:id/songs and GET /songs (List all uploaded songs for room)
+storageRouter.get(['/rooms/:id/songs', '/songs'], async (req: Request, res: Response) => {
+  try {
+    const roomId = req.params.id || (req.query.roomId as string);
+    if (!roomId) {
+      return res.status(400).json({ error: 'Missing roomId' });
+    }
+    const songs = await prisma.song.findMany({
+      where: { roomId },
+      orderBy: { createdAt: 'asc' },
+    });
+    return res.json({ songs: songs.map(formatSong) });
+  } catch (error) {
+    console.error('Error fetching songs for room:', error);
+    return res.status(500).json({ error: 'Failed to fetch songs' });
+  }
+});
+
+// DELETE /rooms/:id/songs/:songId
+storageRouter.delete('/rooms/:id/songs/:songId', async (req: Request, res: Response) => {
+  try {
+    const { id, songId } = req.params;
+    await prisma.queueItem.deleteMany({
+      where: { roomId: id, songId },
+    });
+    await prisma.song.deleteMany({
+      where: { id: songId, roomId: id },
+    });
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting song:', error);
+    return res.status(500).json({ error: 'Failed to delete song' });
+  }
+});
