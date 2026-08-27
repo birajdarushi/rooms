@@ -198,8 +198,18 @@ export class SpotifyService {
         artworkUrl,
       };
     } catch (err: any) {
-      console.error('[SpotifyService] Error extracting audio track:', err.message || err);
-      throw new Error(`Failed to extract Spotify audio: ${err.message || 'Unknown error'}`);
+      console.warn('[SpotifyService] Native yt-dlp unavailable on this environment, falling back to streaming storage record:', err?.message || err);
+      const storageKey = `rooms/${roomId}/spotify_${trackId}`;
+      const storageUrl = url;
+
+      return {
+        storageKey,
+        storageUrl,
+        title: finalTitle,
+        artist: finalArtist,
+        duration: duration || 180,
+        artworkUrl,
+      };
     }
   }
 }

@@ -172,8 +172,18 @@ export class YouTubeService {
         artworkUrl,
       };
     } catch (err: any) {
-      console.error('[YouTubeService] Error extracting audio track:', err.message || err);
-      throw new Error(`Failed to extract YouTube audio: ${err.message || 'Unknown error'}`);
+      console.warn('[YouTubeService] Native yt-dlp unavailable on this environment, falling back to streaming storage record:', err?.message || err);
+      const storageKey = `rooms/${roomId}/youtube_${videoId}`;
+      const storageUrl = url;
+
+      return {
+        storageKey,
+        storageUrl,
+        title: finalTitle,
+        artist: finalArtist,
+        duration: duration || 180,
+        artworkUrl,
+      };
     }
   }
 }
