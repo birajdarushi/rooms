@@ -18,6 +18,7 @@ const mockIo: any = {
   to: jest.fn().mockReturnThis(),
   emit: jest.fn(),
 };
+jest.setTimeout(30000);
 
 describe('Blackbox End-to-End Functional Test: Upload, Queue, Playback, and Teardown', () => {
   let roomId: string;

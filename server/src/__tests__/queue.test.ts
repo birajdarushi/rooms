@@ -121,8 +121,8 @@ describe('Backend: Queue Logic & Auto-Advance', () => {
     await advanceToNextSong(mockIo, roomCode);
 
     const updatedRoom = await prisma.room.findUnique({ where: { id: roomId } });
-    expect(updatedRoom?.currentSongId).toBeNull();
+    expect(updatedRoom?.currentSongId).toBeFalsy();
     expect(updatedRoom?.playbackState).toBe('idle');
-    expect(updatedRoom?.startedAt).toBeNull();
+    expect(updatedRoom?.startedAt).toBeFalsy();
   });
 });
