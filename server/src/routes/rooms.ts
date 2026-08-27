@@ -3,7 +3,8 @@ import jwt from 'jsonwebtoken';
 import { nanoid, customAlphabet } from 'nanoid';
 import { prisma, formatRoom, formatSong, formatQueueItem } from '../db/prisma';
 import { config } from '../config/env';
-import { CreateRoomResponse, JoinRoomResponse, RoomState } from '../shared';
+import { publishToRoom } from '../services/ablyPublisher';
+import { SocketEvents, CreateRoomResponse, JoinRoomResponse, RoomState } from '../shared';
 
 const generateRoomCode = customAlphabet('23456789ABCDEFGHJKLMNPQRSTUVWXYZ', 5);
 
@@ -16,7 +17,6 @@ roomsRouter.post('/', async (req: Request, res: Response) => {
     const hostId = `user_${nanoid(10)}`;
 
     let code = generateRoomCode();
-    // Ensure code uniqueness
     let existing = await prisma.room.findUnique({ where: { code } });
     let attempts = 0;
     while (existing && attempts < 10) {
@@ -44,33 +44,34 @@ roomsRouter.post('/', async (req: Request, res: Response) => {
 
     const responseData: CreateRoomResponse = {
       room: formatRoom(room),
-      user: {
-        userId: hostId,
-        displayName,
-        isHost: true,
-      },
+      user: { userId: hostId, displayName, isHost: true },
       token,
     };
 
     return res.status(201).json(responseData);
   } catch (error: any) {
     console.error('Error creating room:', error);
-    return res.status(500).json({ error: 'Failed to create room', details: error?.message || String(error) });
+    return res.status(500).json({ error: 'Failed to create room', details: error?.message });
   }
 });
 
-// Join existing room by code
+// Join existing room by code — returns full room state so client doesn't need ROOM_STATE_SYNC event
 roomsRouter.post('/join', async (req: Request, res: Response) => {
   try {
     const { code, displayName = 'Listener' } = req.body;
 
-    if (!code) {
-      return res.status(400).json({ error: 'Room code is required' });
-    }
+    if (!code) return res.status(400).json({ error: 'Room code is required' });
 
     const normalizedCode = code.trim().toUpperCase();
     const room = await prisma.room.findUnique({
       where: { code: normalizedCode },
+      include: {
+        songs: true,
+        queueItems: {
+          include: { song: true },
+          orderBy: { position: 'asc' },
+        },
+      },
     });
 
     if (!room || room.status === 'ended') {
@@ -86,14 +87,32 @@ roomsRouter.post('/join', async (req: Request, res: Response) => {
       { expiresIn: '1d' }
     );
 
-    const responseData: JoinRoomResponse = {
+    const currentSong = room.currentSongId
+      ? (room.songs.find((s) => s.id === room.currentSongId) ?? null)
+      : null;
+
+    // Notify room members of new member (member count via Ably presence, but we can also broadcast)
+    await publishToRoom(normalizedCode, SocketEvents.MEMBER_COUNT, {
+      count: null, // clients will use Ably presence for accurate count
+      joined: displayName,
+    }).catch(() => {});
+
+    const responseData: JoinRoomResponse & {
+      queue: any[];
+      currentSong: any;
+      playbackState: string;
+      startedAt: number | null;
+      offsetSeconds: number;
+    } = {
       room: formatRoom(room),
-      user: {
-        userId,
-        displayName,
-        isHost,
-      },
+      user: { userId, displayName, isHost },
       token,
+      // Full room state returned directly so client doesn't need a separate socket event
+      queue: room.queueItems.map(formatQueueItem),
+      currentSong: currentSong ? formatSong(currentSong) : null,
+      playbackState: room.playbackState,
+      startedAt: room.startedAt ? Number(room.startedAt) : null,
+      offsetSeconds: room.offsetSeconds,
     };
 
     return res.status(200).json(responseData);

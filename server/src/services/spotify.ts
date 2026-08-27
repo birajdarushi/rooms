@@ -1,25 +1,5 @@
-import { execFile } from 'child_process';
-import { promisify } from 'util';
-import path from 'path';
-import fs from 'fs';
 import { SpotifyTrackInfo } from '../shared';
-
-const execFileAsync = promisify(execFile);
-
-const POSSIBLE_YTDLP_PATHS = [
-  '/opt/homebrew/bin/yt-dlp',
-  '/usr/local/bin/yt-dlp',
-  '/usr/bin/yt-dlp',
-  'yt-dlp',
-];
-
-function getYtDlpBinary(): string {
-  for (const binPath of POSSIBLE_YTDLP_PATHS) {
-    if (binPath === 'yt-dlp') return binPath;
-    if (fs.existsSync(binPath)) return binPath;
-  }
-  return 'yt-dlp';
-}
+import { extractAudioUrl } from './cobalt';
 
 export function isValidSpotifyUrl(url: string): boolean {
   if (!url || typeof url !== 'string') return false;
@@ -34,12 +14,6 @@ export function extractSpotifyTrackId(url: string): string | null {
 }
 
 export class SpotifyService {
-  private ytDlpPath: string;
-
-  constructor() {
-    this.ytDlpPath = getYtDlpBinary();
-  }
-
   /**
    * Resolves Spotify track metadata via Spotify embed / oEmbed endpoints.
    */
@@ -120,12 +94,12 @@ export class SpotifyService {
   }
 
   /**
-   * Matches Spotify track to high-fidelity audio stream and extracts MP3 directly into room's storage directory.
+   * Extracts a streamable audio URL for the Spotify track via cobalt.tools.
+   * No file download — returns a temporary CDN stream URL directly.
    */
-  public async downloadSpotifyTrack(params: {
+  public async getStreamUrl(params: {
     roomId: string;
     url: string;
-    uploadsDir: string;
     customTitle?: string;
     customArtist?: string;
   }): Promise<{
@@ -136,7 +110,7 @@ export class SpotifyService {
     duration: number;
     artworkUrl: string;
   }> {
-    const { roomId, url, uploadsDir, customTitle, customArtist } = params;
+    const { roomId, url, customTitle, customArtist } = params;
 
     const info = await this.getTrackInfo(url);
     const trackId = extractSpotifyTrackId(url) || 'track';
@@ -145,82 +119,21 @@ export class SpotifyService {
     const duration = info.duration;
     const artworkUrl = info.thumbnail;
 
-    const roomDir = path.join(uploadsDir, 'rooms', roomId);
-    if (!fs.existsSync(roomDir)) {
-      fs.mkdirSync(roomDir, { recursive: true });
-    }
-
-    const timestamp = Date.now();
-    const fileName = `${timestamp}_spotify_${trackId}.mp3`;
-    const targetFilePath = path.join(roomDir, fileName);
-    const outputTemplate = path.join(roomDir, `${timestamp}_spotify_${trackId}.%(ext)s`);
-
-    // Clean artist and title for maximum YouTube matching accuracy
-    const cleanArtist = (finalArtist.split(',')[0] || finalArtist)
-      .replace(/\([^)]*\)/g, '')
-      .replace(/\[[^\]]*\]/g, '')
-      .replace(/[^\w\s]/gi, ' ')
-      .trim();
-    const cleanTitle = finalTitle
-      .replace(/\([^)]*\)/g, '')
-      .replace(/\[[^\]]*\]/g, '')
-      .replace(/[^\w\s]/gi, ' ')
-      .trim();
-
-    const searchQuery = `ytsearch1:${cleanArtist} ${cleanTitle} audio`;
-
-    const binary = this.ytDlpPath;
-    const args = [
-      '-x',
-      '--audio-format',
-      'mp3',
-      '--audio-quality',
-      '0',
-      '--no-playlist',
-      '--no-warnings',
-      '-o',
-      outputTemplate,
-      searchQuery,
-    ];
-
     try {
-      console.log(`[SpotifyService] 📥 Extracting Spotify audio for room ${roomId}: "${finalTitle}" by ${finalArtist}...`);
-      await execFileAsync(binary, args, { maxBuffer: 10 * 1024 * 1024 });
-
-      const files = fs.existsSync(roomDir) ? fs.readdirSync(roomDir) : [];
-      const prefix = `${timestamp}_spotify_${trackId}`;
-      const foundFile = files.find((f) => f.startsWith(prefix));
-
-      if (!foundFile) {
-        throw new Error('Downloaded Spotify audio file not found on disk.');
-      }
-
-      const storageKey = `rooms/${roomId}/${foundFile}`;
-      const storageUrl = `/uploads/${storageKey}`;
-
-      console.log(`[SpotifyService] ✅ Spotify audio cached to ${storageKey} (${duration}s)`);
+      console.log(`[SpotifyService] Extracting stream via cobalt for: "${finalTitle}" by ${finalArtist}`);
+      const { streamUrl } = await extractAudioUrl(url.trim());
 
       return {
-        storageKey,
-        storageUrl,
+        storageKey: `cobalt/rooms/${roomId}/spotify_${trackId}`,
+        storageUrl: streamUrl,
         title: finalTitle,
         artist: finalArtist,
         duration,
         artworkUrl,
       };
     } catch (err: any) {
-      console.warn('[SpotifyService] Native yt-dlp unavailable on this environment, falling back to streaming storage record:', err?.message || err);
-      const storageKey = `rooms/${roomId}/spotify_${trackId}`;
-      const storageUrl = url;
-
-      return {
-        storageKey,
-        storageUrl,
-        title: finalTitle,
-        artist: finalArtist,
-        duration: duration || 180,
-        artworkUrl,
-      };
+      console.error('[SpotifyService] Cobalt extraction failed:', err?.message || err);
+      throw new Error(`Audio extraction failed: ${err?.message || 'cobalt.tools unavailable'}`);
     }
   }
 }

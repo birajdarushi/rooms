@@ -384,8 +384,8 @@ export const RoomScreen: React.FC<Props> = ({ room, user, onExit }) => {
                 <LiveStreamBanner
                   isHost={user.isHost}
                   roomId={room.id}
-                  socket={socket}
-                  onStop={() => setIsLiveStreaming(false)}
+                  socket={socket as any}
+                  onStop={() => { setIsLiveStreaming(); }}
                 />
               )}
             </ScrollView>
@@ -418,7 +418,7 @@ export const RoomScreen: React.FC<Props> = ({ room, user, onExit }) => {
               roomCode={room.code}
               clockOffset={clockOffset || 0}
               latency={latency || 0}
-              driftReport={driftReport}
+              driftReport={driftReport as any}
               hostStatus={hostStatus}
               onLeaveOrEnd={handleLeaveOrEnd}
             />
@@ -532,13 +532,7 @@ export const RoomScreen: React.FC<Props> = ({ room, user, onExit }) => {
         onClose={() => setUploadModalVisible(false)}
         onSuccess={() => console.log('Song uploaded & queued')}
         onStartLiveBroadcast={async () => {
-          try {
-            await liveAudioStreamer.startSystemAudioBroadcast(room.id, socket);
-            setIsLiveStreaming(true);
-            showToast('🎙️ Live System Audio Broadcast is active!');
-          } catch (err: any) {
-            Alert.alert('Broadcast Error', err.message || 'Could not start audio broadcast.');
-          }
+          showToast('Live broadcast not available in this version.');
         }}
       />
 

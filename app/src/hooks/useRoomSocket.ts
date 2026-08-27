@@ -1,9 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Platform } from 'react-native';
-import { io, Socket } from 'socket.io-client';
+import { getAblyChannel, closeAbly } from '../services/AblyService';
 import { getApiBaseUrl } from '../api/client';
 import { audioEngine } from '../services/AudioEngine';
-import { liveAudioStreamer } from '../services/LiveAudioStreamer';
 import { useSyncEngine } from './useSyncEngine';
 import { calculateTargetPosition } from '../utils/syncMath';
 import {
@@ -20,120 +18,85 @@ import {
 } from '../types';
 
 export function useRoomSocket(initialRoom: Room, user: UserSession, onRoomEnded: (reason: string) => void) {
-  const [socket, setSocket] = useState<Socket | null>(null);
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [memberCount, setMemberCount] = useState<number>(1);
   const [playbackState, setPlaybackState] = useState<PlaybackStatus>(initialRoom.playbackState);
   const [hostStatus, setHostStatus] = useState<HostStatusPayload>({ isHostConnected: true });
   const [isConnected, setIsConnected] = useState<boolean>(false);
-  const [isLiveStreaming, setIsLiveStreaming] = useState<boolean>(false);
+  const [isLiveStreaming] = useState<boolean>(false);
 
   const { clockOffset, latency, isSynced, driftReport, performClockSync } = useSyncEngine(
-    socket,
+    null,
     currentSong
   );
 
-  const socketRef = useRef<Socket | null>(null);
   const roomRef = useRef<Room>(initialRoom);
   const userRef = useRef<UserSession>(user);
   const currentSongRef = useRef<Song | null>(null);
+  const clockOffsetRef = useRef<number>(0);
 
+  useEffect(() => { currentSongRef.current = currentSong; }, [currentSong]);
+  useEffect(() => { clockOffsetRef.current = clockOffset; }, [clockOffset]);
+
+  // ─────────────────────────────────────────────────────────────────
+  // Initialize Ably subscription + seed state from join response
+  // ─────────────────────────────────────────────────────────────────
   useEffect(() => {
-    currentSongRef.current = currentSong;
-  }, [currentSong]);
+    const roomCode = initialRoom.code;
+    const channel = getAblyChannel(roomCode);
 
-  // Initialize Socket connection
-  useEffect(() => {
-    const serverUrl = getApiBaseUrl();
-    const newSocket = io(serverUrl, {
-      transports: ['websocket', 'polling'],
-      reconnectionAttempts: 10,
-    });
-
-    socketRef.current = newSocket;
-    setSocket(newSocket);
-
-    newSocket.on('connect', async () => {
-      console.log(`[Socket] Connected to ${serverUrl} as ${user.displayName}`);
-      setIsConnected(true);
-
-      // Perform clock offset calculation
-      const computedOffset = await performClockSync(newSocket);
-
-      // Join room channel
-      newSocket.emit(SocketEvents.JOIN_ROOM, {
-        roomCode: initialRoom.code,
-        userId: user.userId,
-        displayName: user.displayName,
-        isHost: user.isHost,
-      });
-
-      // If mid-song when joining, compute initial seek position and resume playback
-      if (initialRoom.currentSongId && initialRoom.playbackState === 'playing' && initialRoom.startedAt) {
-        const { targetPosition } = calculateTargetPosition({
-          startedAt: initialRoom.startedAt,
-          offsetSeconds: initialRoom.offsetSeconds,
-          clockOffset: computedOffset,
-        });
-        console.log(`[Socket] Late-join mid-song detected: target position = ${targetPosition.toFixed(2)}s`);
-      }
-    });
-
-    newSocket.on('disconnect', () => {
-      console.log('[Socket] Disconnected from server');
-      setIsConnected(false);
-    });
-
-    // 1. Queue Updates (broadcast to all — triggered by new uploads)
-    newSocket.on(SocketEvents.QUEUE_UPDATED, (payload: { queue: QueueItem[] }) => {
-      console.log(`[Socket] Queue updated broadcast: ${payload.queue.length} songs`);
-      setQueue(payload.queue);
-    });
-
-    // 1b. Room State Sync (sent only to THIS socket right after joining)
-    // Contains the full current state: existing queue, current song, playback state
-    newSocket.on(SocketEvents.ROOM_STATE_SYNC, async (payload: RoomStateSyncPayload) => {
-      console.log(`[Socket] Room state sync received: queue=${payload.queue.length} songs, currentSong=${payload.currentSong?.title || 'none'}, state=${payload.playbackState}`);
-      setQueue(payload.queue);
-      setPlaybackState(payload.playbackState);
-
-      if (payload.currentSong) {
-        setCurrentSong(payload.currentSong);
-        const isPlaying = payload.playbackState === 'playing';
+    // Apply initial room state passed from the join response
+    const seed = (initialRoom as any)._seedState;
+    if (seed) {
+      setQueue(seed.queue ?? []);
+      setPlaybackState(seed.playbackState ?? 'idle');
+      if (seed.currentSong) {
+        setCurrentSong(seed.currentSong);
+        const isPlaying = seed.playbackState === 'playing';
         const targetPos = calculateTargetPosition({
-          startedAt: payload.startedAt,
-          offsetSeconds: payload.offsetSeconds,
+          startedAt: seed.startedAt,
+          offsetSeconds: seed.offsetSeconds,
           clockOffset: 0,
-          duration: payload.currentSong.duration,
+          duration: seed.currentSong.duration,
         }).targetPosition;
 
-        await audioEngine.loadTrack(
+        audioEngine.loadTrack(
           {
-            id: payload.currentSong.id,
-            url: payload.currentSong.storageUrl,
-            title: payload.currentSong.title,
-            artist: payload.currentSong.artist,
-            duration: payload.currentSong.duration,
+            id: seed.currentSong.id,
+            url: seed.currentSong.storageUrl,
+            title: seed.currentSong.title,
+            artist: seed.currentSong.artist,
+            duration: seed.currentSong.duration,
           },
           isPlaying,
           targetPos
-        );
+        ).catch(() => {});
       }
+    }
+
+    // Perform initial clock sync via HTTP
+    performClockSync(null as any).catch(() => {});
+
+    // Subscribe to Ably channel events
+    channel.subscribe(SocketEvents.QUEUE_UPDATED, (msg) => {
+      const payload = msg.data as { queue: QueueItem[] };
+      console.log(`[Ably] QUEUE_UPDATED: ${payload.queue.length} songs`);
+      setQueue(payload.queue);
     });
 
-    // 2. Song Changed / Auto-advance
-    newSocket.on(SocketEvents.SONG_CHANGED, async (payload: SongChangedPayload) => {
-      console.log(`[Socket] Song changed:`, payload.currentSong?.title || 'None');
+    channel.subscribe(SocketEvents.SONG_CHANGED, async (msg) => {
+      const payload = msg.data as SongChangedPayload;
+      console.log(`[Ably] SONG_CHANGED: ${payload.currentSong?.title ?? 'None'}`);
       setCurrentSong(payload.currentSong);
-      setPlaybackState(payload.playbackState);
+      setPlaybackState(payload.playbackState as PlaybackStatus);
 
       if (payload.currentSong) {
         const isPlaying = payload.playbackState === 'playing';
         const targetPos = calculateTargetPosition({
           startedAt: payload.startedAt,
           offsetSeconds: payload.offsetSeconds,
-          clockOffset: 0,
+          clockOffset: clockOffsetRef.current,
           duration: payload.currentSong.duration,
         }).targetPosition;
 
@@ -153,153 +116,200 @@ export function useRoomSocket(initialRoom: Room, user: UserSession, onRoomEnded:
       }
     });
 
-    // 2b. Playback State Events (for listeners and room UI synchronization)
-    newSocket.on(SocketEvents.PLAY, (payload: PlayPayload) => {
-      console.log('[Socket] Incoming PLAY event');
+    channel.subscribe(SocketEvents.PLAY, async (msg) => {
+      const payload = msg.data;
+      console.log('[Ably] PLAY event received');
       setPlaybackState('playing');
-    });
 
-    newSocket.on(SocketEvents.PAUSE, (payload: PausePayload) => {
-      console.log('[Socket] Incoming PAUSE event');
-      setPlaybackState('paused');
-    });
+      const targetPos = calculateTargetPosition({
+        startedAt: payload.startedAt,
+        offsetSeconds: payload.offsetSeconds,
+        clockOffset: clockOffsetRef.current,
+        duration: currentSongRef.current?.duration,
+      }).targetPosition;
 
-    newSocket.on(SocketEvents.SEEK, (payload: SeekPayload) => {
-      console.log('[Socket] Incoming SEEK event to', payload.offsetSeconds, 'state:', payload.playbackState);
-      if (payload.playbackState) {
-        setPlaybackState(payload.playbackState);
+      const current = audioEngine.getCurrentTrack();
+      if (current && current.id !== payload.songId) {
+        // Different song — skip
+      } else if (!current) {
+        // No track loaded
+      } else {
+        const pos = await audioEngine.getPosition();
+        if (Math.abs(pos - targetPos) > 0.1) {
+          await audioEngine.seekTo(targetPos);
+        }
+        await audioEngine.play();
       }
     });
 
-    // 3. Member Count
-    newSocket.on(SocketEvents.MEMBER_COUNT, (payload: { count: number }) => {
-      setMemberCount(payload.count);
+    channel.subscribe(SocketEvents.PAUSE, async (msg) => {
+      const payload = msg.data;
+      console.log('[Ably] PAUSE event received');
+      setPlaybackState('paused');
+      await audioEngine.seekTo(payload.offsetSeconds);
+      await audioEngine.pause();
     });
 
-    // 4. Host Status (Grace period timer)
-    newSocket.on(SocketEvents.HOST_STATUS, (payload: HostStatusPayload) => {
-      console.log(`[Socket] Host status update:`, payload);
-      setHostStatus(payload);
+    channel.subscribe(SocketEvents.SEEK, async (msg) => {
+      const payload = msg.data;
+      console.log('[Ably] SEEK event received to', payload.offsetSeconds);
+      if (payload.playbackState) setPlaybackState(payload.playbackState as PlaybackStatus);
+
+      const isPlaying = payload.playbackState === 'playing';
+      if (isPlaying && payload.startedAt) {
+        const targetPos = calculateTargetPosition({
+          startedAt: payload.startedAt,
+          offsetSeconds: payload.offsetSeconds,
+          clockOffset: clockOffsetRef.current,
+          duration: currentSongRef.current?.duration,
+        }).targetPosition;
+        await audioEngine.seekTo(targetPos);
+        await audioEngine.play();
+      } else {
+        await audioEngine.seekTo(payload.offsetSeconds);
+        await audioEngine.pause();
+      }
     });
 
-    // 5. Room Ended
-    newSocket.on(SocketEvents.ROOM_ENDED, async (payload: RoomEndedPayload) => {
-      console.log(`[Socket] Room ended by server: reason = ${payload.reason}`);
+    channel.subscribe(SocketEvents.SYNC_PULSE, async (msg) => {
+      const payload = msg.data;
+      if (payload.playbackState !== 'playing' || !payload.startedAt) {
+        await audioEngine.setRate(1.0);
+        return;
+      }
+
+      const { targetPosition: expected } = calculateTargetPosition({
+        startedAt: payload.startedAt,
+        offsetSeconds: payload.offsetSeconds,
+        clockOffset: clockOffsetRef.current,
+        duration: currentSongRef.current?.duration,
+      });
+
+      const actual = await audioEngine.getPosition();
+      const diffMs = (expected - actual) * 1000;
+      const absDiff = Math.abs(diffMs);
+
+      if (absDiff > 350) {
+        await audioEngine.seekTo(expected);
+        await audioEngine.setRate(1.0);
+      } else if (absDiff > 120) {
+        await audioEngine.setRate(diffMs > 0 ? 1.025 : 0.975);
+      } else if (absDiff > 25) {
+        await audioEngine.setRate(diffMs > 0 ? 1.012 : 0.988);
+      } else {
+        await audioEngine.setRate(1.0);
+      }
+    });
+
+    channel.subscribe(SocketEvents.MEMBER_COUNT, (msg) => {
+      if (msg.data?.count != null) setMemberCount(msg.data.count);
+    });
+
+    channel.subscribe(SocketEvents.HOST_STATUS, (msg) => {
+      setHostStatus(msg.data as HostStatusPayload);
+    });
+
+    channel.subscribe(SocketEvents.ROOM_ENDED, async (msg) => {
+      const payload = msg.data as RoomEndedPayload;
+      console.log(`[Ably] ROOM_ENDED: ${payload.reason}`);
       await audioEngine.unload();
       onRoomEnded(payload.reason);
     });
 
-    // 6. Live Stream Events
-    newSocket.on(SocketEvents.STREAM_STARTED, async (payload: any) => {
-      console.log('[Socket] Live System Stream Started:', payload);
-      setIsLiveStreaming(true);
-      if (!user.isHost) {
-        if (Platform.OS === 'web') {
-          liveAudioStreamer.joinStreamAsListener(initialRoom.id, newSocket);
-        } else {
-          // Native Android & iOS (Expo Go)
-          const streamUrl = `${getApiBaseUrl()}/api/stream/${initialRoom.id}/live.mp3`;
-          console.log(`[Socket] 📱 Android Native connecting to live MP3 stream: ${streamUrl}`);
-          await audioEngine.loadTrack(
-            {
-              id: 'live-stream-' + initialRoom.id,
-              url: streamUrl,
-              title: 'Live System Audio Broadcast',
-              artist: 'Streaming from Host',
-              duration: 0,
-            },
-            true,
-            0
-          );
-        }
-      }
-    });
+    // Track Ably connection state
+    channel.attach().then(() => setIsConnected(true)).catch(() => {});
 
-    newSocket.on(SocketEvents.STREAM_STOPPED, async () => {
-      console.log('[Socket] Live System Stream Stopped');
-      setIsLiveStreaming(false);
-      if (!user.isHost) {
-        if (Platform.OS === 'web') {
-          liveAudioStreamer.stopBroadcast(initialRoom.id, newSocket);
-        } else {
-          await audioEngine.unload();
-        }
-      }
-    });
-
-    // Notify server when local track finishes
+    // Notify when track ends — call REST endpoint
     audioEngine.setOnTrackEnded(() => {
-      if (currentSongRef.current) {
-        console.log(`[Socket] Local track ended for song: ${currentSongRef.current.title} (${currentSongRef.current.id}). Emitting TRACK_ENDED to server.`);
-        newSocket.emit(SocketEvents.TRACK_ENDED, { songId: currentSongRef.current.id });
+      const song = currentSongRef.current;
+      if (song) {
+        console.log(`[Ably] Track ended: ${song.title} — notifying server`);
+        fetch(`${getApiBaseUrl()}/api/playback/track-ended`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ roomCode: roomCode, songId: song.id }),
+        }).catch(() => {});
       }
     });
 
     return () => {
-      newSocket.disconnect();
+      channel.unsubscribe();
+      channel.detach().catch(() => {});
       audioEngine.unload();
     };
-  }, [initialRoom.code, initialRoom.id, user.userId, user.displayName, user.isHost, onRoomEnded, performClockSync]);
+  }, [initialRoom.code, initialRoom.id, onRoomEnded, performClockSync]);
 
-  // Host Action Handlers
+  // ─────────────────────────────────────────────────────────────────
+  // Host action handlers — all call REST endpoints, Ably broadcasts
+  // ─────────────────────────────────────────────────────────────────
+  const callPlayback = useCallback(async (path: string, body: Record<string, any>) => {
+    try {
+      await fetch(`${getApiBaseUrl()}/api/playback/${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomCode: initialRoom.code, ...body }),
+      });
+    } catch (err) {
+      console.error(`[Playback] ${path} failed:`, err);
+    }
+  }, [initialRoom.code]);
+
   const emitPlay = useCallback(
     (songId: string, offsetSeconds: number) => {
-      if (!socketRef.current || !user.isHost) return;
+      if (!user.isHost) return;
       setPlaybackState('playing');
-      socketRef.current.emit(SocketEvents.PLAY, { songId, offsetSeconds });
+      callPlayback('play', { songId, offsetSeconds });
     },
-    [user.isHost]
+    [user.isHost, callPlayback]
   );
 
   const emitPause = useCallback(
     (offsetSeconds: number) => {
-      if (!socketRef.current || !user.isHost) return;
+      if (!user.isHost) return;
       setPlaybackState('paused');
-      socketRef.current.emit(SocketEvents.PAUSE, { offsetSeconds });
+      callPlayback('pause', { offsetSeconds });
     },
-    [user.isHost]
+    [user.isHost, callPlayback]
   );
 
   const emitSeek = useCallback(
     (offsetSeconds: number) => {
-      if (!socketRef.current || !user.isHost) return;
-      socketRef.current.emit(SocketEvents.SEEK, { offsetSeconds });
+      if (!user.isHost) return;
+      callPlayback('seek', { offsetSeconds });
     },
-    [user.isHost]
+    [user.isHost, callPlayback]
   );
 
   const emitSkip = useCallback(() => {
-    if (!socketRef.current || !user.isHost) return;
-    socketRef.current.emit(SocketEvents.SKIP);
-  }, [user.isHost]);
+    if (!user.isHost) return;
+    callPlayback('skip', {});
+  }, [user.isHost, callPlayback]);
 
   const emitReorderQueue = useCallback(
     (orderedQueueItemIds: string[]) => {
-      if (!socketRef.current || !user.isHost) return;
-      socketRef.current.emit(SocketEvents.REORDER_QUEUE, { orderedQueueItemIds });
+      if (!user.isHost) return;
+      callPlayback('reorder', { orderedQueueItemIds });
     },
-    [user.isHost]
+    [user.isHost, callPlayback]
   );
 
   const emitRemoveFromQueue = useCallback(
     (queueItemId: string) => {
-      if (!socketRef.current || !user.isHost) return;
-      socketRef.current.emit(SocketEvents.REMOVE_FROM_QUEUE, { queueItemId });
+      if (!user.isHost) return;
+      callPlayback('remove', { queueItemId });
     },
-    [user.isHost]
+    [user.isHost, callPlayback]
   );
 
   const endParty = useCallback(() => {
-    if (!socketRef.current) return;
     if (user.isHost) {
-      socketRef.current.emit(SocketEvents.LEAVE_ROOM, { endRoom: true });
-    } else {
-      socketRef.current.emit(SocketEvents.LEAVE_ROOM, { endRoom: false });
+      callPlayback('end-room', {});
     }
-  }, [user.isHost]);
+    closeAbly();
+  }, [user.isHost, callPlayback]);
 
   return {
-    socket,
+    socket: null, // Kept for type compat — no longer Socket.io
     isConnected,
     currentSong,
     queue,
@@ -311,7 +321,7 @@ export function useRoomSocket(initialRoom: Room, user: UserSession, onRoomEnded:
     isSynced,
     driftReport,
     isLiveStreaming,
-    setIsLiveStreaming,
+    setIsLiveStreaming: () => {},
     emitPlay,
     emitPause,
     emitSeek,

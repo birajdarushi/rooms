@@ -1,52 +1,13 @@
 import { Router, Request, Response } from 'express';
-import os from 'os';
 import { prisma, formatSong, formatQueueItem } from '../db/prisma';
 import { spotifyService, isValidSpotifyUrl } from '../services/spotify';
-import { config } from '../config/env';
-import { getSocketServer } from '../sockets/syncHandler';
+import { publishToRoom } from '../services/ablyPublisher';
 import { SocketEvents } from '../shared';
-
-function getServerBaseUrl(req: Request): string {
-  const proto = (req.headers['x-forwarded-proto'] as string) || (req.secure ? 'https' : 'http');
-  const forwardedHost = (req.headers['x-forwarded-host'] as string) || req.get('host');
-
-  if (proto === 'https' && forwardedHost) {
-    return `https://${forwardedHost}`;
-  }
-  if (forwardedHost && (forwardedHost.includes('trycloudflare.com') || forwardedHost.includes('birajdar.in') || forwardedHost.includes('pages.dev') || forwardedHost.includes('vercel.app'))) {
-    return `https://${forwardedHost}`;
-  }
-
-  if (process.env.HOST_IP) {
-    return `http://${process.env.HOST_IP}:${config.port}`;
-  }
-
-  const ifaces = os.networkInterfaces();
-  const preferred = ['en0', 'wlan0', 'eth0', 'Wi-Fi'];
-  for (const name of preferred) {
-    for (const iface of ifaces[name] || []) {
-      if (iface.family === 'IPv4' && !iface.internal) {
-        return `http://${iface.address}:${config.port}`;
-      }
-    }
-  }
-
-  for (const ifaceList of Object.values(ifaces)) {
-    for (const iface of ifaceList || []) {
-      if (iface.family === 'IPv4' && !iface.internal && !iface.address.startsWith('172.')) {
-        return `http://${iface.address}:${config.port}`;
-      }
-    }
-  }
-
-  const host = req.get('host') || `localhost:${config.port}`;
-  return `http://${host}`;
-}
 
 export const spotifyRouter = Router();
 
 /**
- * 1. Fetch Spotify Track Info (Title, Artist, Duration, Album Artwork)
+ * 1. Fetch Spotify Track Info
  */
 spotifyRouter.post('/info', async (req: Request, res: Response) => {
   try {
@@ -64,15 +25,13 @@ spotifyRouter.post('/info', async (req: Request, res: Response) => {
 });
 
 /**
- * 2. Download/Match Audio from Spotify and Add to Room Queue
+ * 2. Extract Audio from Spotify and Add to Room Queue
  */
 spotifyRouter.post('/queue', async (req: Request, res: Response) => {
   try {
     const { roomId, url, title, artist, uploaderId = 'host' } = req.body;
 
-    if (!roomId) {
-      return res.status(400).json({ error: 'Missing roomId.' });
-    }
+    if (!roomId) return res.status(400).json({ error: 'Missing roomId.' });
     if (!url || typeof url !== 'string' || !isValidSpotifyUrl(url)) {
       return res.status(400).json({ error: 'Valid Spotify track URL is required.' });
     }
@@ -86,27 +45,20 @@ spotifyRouter.post('/queue', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Room not found or has ended.' });
     }
 
-    const baseUrl = getServerBaseUrl(req);
-
-    // Extract/match audio
-    const result = await spotifyService.downloadSpotifyTrack({
+    // Extract stream URL via cobalt
+    const result = await spotifyService.getStreamUrl({
       roomId,
       url,
-      uploadsDir: config.storage.localUploadDir,
       customTitle: title,
       customArtist: artist,
     });
-
-    const fullStorageUrl = result.storageUrl.startsWith('http')
-      ? result.storageUrl
-      : `${baseUrl}${result.storageUrl}`;
 
     // Create Song in DB
     const song = await prisma.song.create({
       data: {
         roomId,
         uploaderId,
-        storageUrl: fullStorageUrl,
+        storageUrl: result.storageUrl,
         storageKey: result.storageKey,
         title: result.title,
         artist: result.artist,
@@ -127,45 +79,37 @@ spotifyRouter.post('/queue', async (req: Request, res: Response) => {
       include: { song: true },
     });
 
-    // If room currently has no track playing, make this the active song
+    // Set as current song if queue was empty
     let isNowCurrentSong = false;
     if (!room.currentSongId) {
       isNowCurrentSong = true;
       await prisma.room.update({
         where: { id: roomId },
-        data: {
-          currentSongId: song.id,
-          playbackState: 'idle',
-          offsetSeconds: 0,
-          startedAt: null,
-        },
+        data: { currentSongId: song.id, playbackState: 'idle', offsetSeconds: 0, startedAt: null },
       });
     }
 
-    // Broadcast updated queue to all room members
-    const io = getSocketServer();
-    if (io) {
-      const allQueueItems = await prisma.queueItem.findMany({
-        where: { roomId },
-        include: { song: true },
-        orderBy: { position: 'asc' },
-      });
+    // Broadcast to all room members via Ably
+    const allQueueItems = await prisma.queueItem.findMany({
+      where: { roomId },
+      include: { song: true },
+      orderBy: { position: 'asc' },
+    });
 
-      io.to(room.code).emit(SocketEvents.QUEUE_UPDATED, {
-        queue: allQueueItems.map(formatQueueItem),
-      });
+    await publishToRoom(room.code, SocketEvents.QUEUE_UPDATED, {
+      queue: allQueueItems.map(formatQueueItem),
+    });
 
-      if (isNowCurrentSong) {
-        io.to(room.code).emit(SocketEvents.SONG_CHANGED, {
-          currentSong: formatSong(song),
-          startedAt: null,
-          offsetSeconds: 0,
-          playbackState: 'idle',
-        });
-      }
+    if (isNowCurrentSong) {
+      await publishToRoom(room.code, SocketEvents.SONG_CHANGED, {
+        currentSong: formatSong(song),
+        startedAt: null,
+        offsetSeconds: 0,
+        playbackState: 'idle',
+      });
     }
 
-    console.log(`[SpotifyRouter] 🟢 Queued Spotify track "${song.title}" (${song.id}) in room ${room.code}`);
+    console.log(`[SpotifyRouter] Queued "${song.title}" in room ${room.code}`);
 
     return res.status(201).json({
       song: formatSong(song),
