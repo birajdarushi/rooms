@@ -155,8 +155,19 @@ export class SpotifyService {
     const targetFilePath = path.join(roomDir, fileName);
     const outputTemplate = path.join(roomDir, `${timestamp}_spotify_${trackId}.%(ext)s`);
 
-    // Search query for matching audio
-    const searchQuery = `ytsearch1:${finalArtist} ${finalTitle} Official Audio`;
+    // Clean artist and title for maximum YouTube matching accuracy
+    const cleanArtist = (finalArtist.split(',')[0] || finalArtist)
+      .replace(/\([^)]*\)/g, '')
+      .replace(/\[[^\]]*\]/g, '')
+      .replace(/[^\w\s]/gi, ' ')
+      .trim();
+    const cleanTitle = finalTitle
+      .replace(/\([^)]*\)/g, '')
+      .replace(/\[[^\]]*\]/g, '')
+      .replace(/[^\w\s]/gi, ' ')
+      .trim();
+
+    const searchQuery = `ytsearch1:${cleanArtist} ${cleanTitle} audio`;
 
     const binary = this.ytDlpPath;
     const args = [

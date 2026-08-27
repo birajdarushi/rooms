@@ -111,6 +111,7 @@ youtubeRouter.post('/queue', async (req: Request, res: Response) => {
         title: result.title,
         artist: result.artist,
         duration: result.duration,
+        artworkUrl: result.artworkUrl,
       },
     });
 
