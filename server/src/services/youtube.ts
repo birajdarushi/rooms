@@ -75,29 +75,38 @@ export class YouTubeService {
     const duration = info.duration;
     const artworkUrl = info.thumbnail;
 
-    try {
-      console.log(`[YouTubeService] Extracting stream via cobalt for: "${finalTitle}"`);
-      const { streamUrl } = await extractAudioUrl(url.trim());
+    let streamUrl = url.trim();
 
-      return {
-        storageKey: `cobalt/rooms/${roomId}/youtube_${videoId}`,
-        storageUrl: streamUrl,
-        title: finalTitle,
-        artist: finalArtist,
-        duration,
-        artworkUrl,
-      };
-    } catch (err: any) {
-      console.warn('[YouTubeService] Streaming URL fallback for:', finalTitle);
-      return {
-        storageKey: `youtube/rooms/${roomId}/${videoId}`,
-        storageUrl: url.trim(),
-        title: finalTitle,
-        artist: finalArtist,
-        duration,
-        artworkUrl,
-      };
+    const EXTRACTOR_URL = process.env.EXTRACTOR_URL;
+    if (EXTRACTOR_URL) {
+      try {
+        console.log(`[YouTubeService] Calling Cloud Extractor for: "${finalTitle}"`);
+        const res = await fetch(`${EXTRACTOR_URL}/extract/youtube`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url }),
+          signal: AbortSignal.timeout(12000),
+        });
+        if (res.ok) {
+          const data: any = await res.json();
+          if (data.streamUrl) {
+            streamUrl = data.streamUrl;
+            console.log(`[YouTubeService] ✅ Audio stream resolved from Cloud Extractor!`);
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[YouTubeService] Extractor error, falling back:`, err.message);
+      }
     }
+
+    return {
+      storageKey: `youtube/rooms/${roomId}/${videoId}`,
+      storageUrl: streamUrl,
+      title: finalTitle,
+      artist: finalArtist,
+      duration,
+      artworkUrl,
+    };
   }
 }
 

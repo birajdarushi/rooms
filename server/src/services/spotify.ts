@@ -126,10 +126,34 @@ export class SpotifyService {
     const trackId = extractSpotifyTrackId(url) || 'track';
     const finalTitle = customTitle?.trim() || info.title;
     const finalArtist = customArtist?.trim() || info.artist;
-    const duration = info.duration;
+    let duration = info.duration;
     const artworkUrl = info.thumbnail;
 
-    const streamUrl = info.audioStreamUrl || url;
+    let streamUrl = info.audioStreamUrl || url;
+
+    // If Cloud Extractor microservice is configured, extract 100% full-length audio stream
+    const EXTRACTOR_URL = process.env.EXTRACTOR_URL;
+    if (EXTRACTOR_URL) {
+      try {
+        console.log(`[SpotifyService] Calling Cloud Extractor for: "${finalTitle}"`);
+        const res = await fetch(`${EXTRACTOR_URL}/extract/spotify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: finalTitle, artist: finalArtist, url }),
+          signal: AbortSignal.timeout(12000),
+        });
+        if (res.ok) {
+          const data: any = await res.json();
+          if (data.streamUrl) {
+            streamUrl = data.streamUrl;
+            if (data.duration) duration = data.duration;
+            console.log(`[SpotifyService] ✅ Full audio stream resolved from Cloud Extractor!`);
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[SpotifyService] Cloud Extractor fallback to preview:`, err.message);
+      }
+    }
 
     return {
       storageKey: `spotify/rooms/${roomId}/${trackId}`,
