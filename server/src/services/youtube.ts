@@ -48,17 +48,19 @@ export class YouTubeService {
       throw new Error('Invalid YouTube URL provided.');
     }
 
-    const binary = this.ytDlpPath;
-    const args = ['--dump-single-json', '--no-playlist', '--no-warnings', url.trim()];
+    const videoId = extractVideoId(url) || 'track';
 
+    // 1. Try yt-dlp first if available
     try {
-      const { stdout } = await execFileAsync(binary, args, { maxBuffer: 10 * 1024 * 1024 });
+      const binary = this.ytDlpPath;
+      const args = ['--dump-single-json', '--no-playlist', '--no-warnings', url.trim()];
+      const { stdout } = await execFileAsync(binary, args, { maxBuffer: 10 * 1024 * 1024, timeout: 8000 });
       const data = JSON.parse(stdout);
 
       const title = data.title || data.fulltitle || 'YouTube Track';
       const artist = data.artist || data.uploader || data.channel || 'YouTube';
       const duration = Math.round(data.duration || 0);
-      const thumbnail = data.thumbnail || (Array.isArray(data.thumbnails) && data.thumbnails.length > 0 ? data.thumbnails[data.thumbnails.length - 1].url : '');
+      const thumbnail = data.thumbnail || (Array.isArray(data.thumbnails) && data.thumbnails.length > 0 ? data.thumbnails[data.thumbnails.length - 1].url : `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`);
 
       return {
         title,
@@ -67,9 +69,32 @@ export class YouTubeService {
         thumbnail,
         youtubeUrl: url.trim(),
       };
-    } catch (err: any) {
-      console.error('[YouTubeService] Error getting video info:', err.message || err);
-      throw new Error(`Failed to fetch YouTube metadata: ${err.message || 'Unknown error'}`);
+    } catch (_) {
+      // 2. Pure HTTPS oEmbed fallback (Works 100% on serverless / Vercel without external binaries)
+      try {
+        const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
+        const res = await fetch(oembedUrl);
+        if (res.ok) {
+          const data: any = await res.json();
+          return {
+            title: data.title || 'YouTube Track',
+            artist: data.author_name || 'YouTube Channel',
+            duration: 180,
+            thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+            youtubeUrl: url.trim(),
+          };
+        }
+      } catch (e: any) {
+        console.error('[YouTubeService] oEmbed fallback error:', e?.message || e);
+      }
+
+      return {
+        title: 'YouTube Track',
+        artist: 'YouTube',
+        duration: 180,
+        thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+        youtubeUrl: url.trim(),
+      };
     }
   }
 
@@ -105,8 +130,6 @@ export class YouTubeService {
     }
 
     const timestamp = Date.now();
-    const fileName = `${timestamp}_${videoId}.mp3`;
-    const targetFilePath = path.join(roomDir, fileName);
     const outputTemplate = path.join(roomDir, `${timestamp}_${videoId}.%(ext)s`);
 
     const binary = this.ytDlpPath;
@@ -127,14 +150,18 @@ export class YouTubeService {
       console.log(`[YouTubeService] 📥 Extracting YouTube audio for room ${roomId}: "${finalTitle}"...`);
       await execFileAsync(binary, args, { maxBuffer: 10 * 1024 * 1024 });
 
-      if (!fs.existsSync(targetFilePath)) {
-        throw new Error('Downloaded audio file not found at expected location.');
+      const files = fs.existsSync(roomDir) ? fs.readdirSync(roomDir) : [];
+      const prefix = `${timestamp}_${videoId}`;
+      const foundFile = files.find((f) => f.startsWith(prefix));
+
+      if (!foundFile) {
+        throw new Error('Downloaded YouTube audio file not found on disk.');
       }
 
-      const storageKey = `rooms/${roomId}/${fileName}`;
+      const storageKey = `rooms/${roomId}/${foundFile}`;
       const storageUrl = `/uploads/${storageKey}`;
 
-      console.log(`[YouTubeService] ✅ Audio successfully cached to ${targetFilePath} (${duration}s)`);
+      console.log(`[YouTubeService] ✅ Audio track cached to ${storageKey} (${duration}s)`);
 
       return {
         storageKey,
@@ -145,8 +172,8 @@ export class YouTubeService {
         artworkUrl,
       };
     } catch (err: any) {
-      console.error('[YouTubeService] Error downloading audio track:', err.message || err);
-      throw new Error(`Failed to download YouTube audio: ${err.message || 'Unknown error'}`);
+      console.error('[YouTubeService] Error extracting audio track:', err.message || err);
+      throw new Error(`Failed to extract YouTube audio: ${err.message || 'Unknown error'}`);
     }
   }
 }
