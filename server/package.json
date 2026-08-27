@@ -8,6 +8,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "jest --runInBand --forceExit",
+    "test:production": "tsx src/scripts/productionBlackboxAudit.ts",
     "postinstall": "prisma generate",
     "vercel-build": "prisma generate && tsc",
     "prisma:generate": "prisma generate",
