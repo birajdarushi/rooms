@@ -16,7 +16,9 @@ export const LoungeVideoCard: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState(true);
   const videoRef = useRef<any>(null);
 
-  const videoUrl = `${getApiBaseUrl()}/uploads/waveRooms_promo.mp4`;
+  const videoUrl = Platform.OS === 'web' 
+    ? '/waveRooms_promo.mp4' 
+    : `${getApiBaseUrl()}/uploads/waveRooms_promo.mp4`;
 
   const toggleMute = () => {
     if (Platform.OS === 'web' && videoRef.current) {
