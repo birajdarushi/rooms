@@ -240,7 +240,7 @@ storageRouter.get(['/rooms/:id/songs', '/songs'], async (req: Request, res: Resp
     }
     const songs = await prisma.song.findMany({
       where: { roomId },
-      orderBy: { createdAt: 'asc' },
+      orderBy: { uploadedAt: 'asc' },
     });
     return res.json({ songs: songs.map(formatSong) });
   } catch (error) {
