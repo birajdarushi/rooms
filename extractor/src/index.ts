@@ -13,11 +13,23 @@ app.get('/health', (_req, res) => {
 });
 
 /**
+ * Common yt-dlp arguments to bypass datacenter IP blocks (using Android & iOS clients)
+ */
+const BASE_YTDLP_ARGS = [
+  '--extractor-args',
+  'youtube:player_client=android,ios',
+  '--no-check-certificates',
+  '--no-warnings',
+  '--prefer-free-formats',
+];
+
+/**
  * Execute yt-dlp safely with argument array
  */
 function runYtDlp(args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    const proc = spawn('yt-dlp', args);
+    const fullArgs = [...BASE_YTDLP_ARGS, ...args];
+    const proc = spawn('yt-dlp', fullArgs);
     let stdout = '';
     let stderr = '';
 
@@ -25,8 +37,11 @@ function runYtDlp(args: string[]): Promise<string> {
     proc.stderr.on('data', (d) => (stderr += d.toString()));
 
     proc.on('close', (code) => {
-      if (code === 0) resolve(stdout.trim());
-      else reject(new Error(stderr.trim() || `yt-dlp exited with code ${code}`));
+      if (code === 0 && stdout.trim()) {
+        resolve(stdout.trim());
+      } else {
+        reject(new Error(stderr.trim() || stdout.trim() || `yt-dlp exited with code ${code}`));
+      }
     });
   });
 }
@@ -39,10 +54,13 @@ app.post(['/extract/youtube', '/extract'], async (req: Request, res: Response) =
   if (!url) return res.status(400).json({ error: 'Missing url' });
 
   try {
-    const [streamUrl, metaRaw] = await Promise.all([
-      runYtDlp(['-g', '-f', 'bestaudio/best', url]),
-      runYtDlp(['--no-playlist', '--print', '%(title)s###%(uploader)s###%(duration)s###%(thumbnail)s', url]).catch(() => ''),
-    ]);
+    const streamUrl = await runYtDlp(['-g', '-f', 'bestaudio/best', url]);
+    const metaRaw = await runYtDlp([
+      '--no-playlist',
+      '--print',
+      '%(title)s###%(uploader)s###%(duration)s###%(thumbnail)s',
+      url,
+    ]).catch(() => '');
 
     const metaParts = metaRaw.split('###');
     const title = metaParts[0] || 'YouTube Track';
@@ -69,16 +87,18 @@ app.post(['/extract/youtube', '/extract'], async (req: Request, res: Response) =
  */
 app.post('/extract/spotify', async (req: Request, res: Response) => {
   const { title, artist, url } = req.body;
-  // Clean artist names (remove commas/special characters) for search
   const cleanArtist = (artist || '').replace(/[^\w\s]/gi, ' ').replace(/\s+/g, ' ').trim();
   const cleanTitle = (title || '').replace(/[^\w\s]/gi, ' ').replace(/\s+/g, ' ').trim();
   const searchQuery = `ytsearch1:${cleanTitle} ${cleanArtist} audio`.trim();
 
   try {
-    const [streamUrl, metaRaw] = await Promise.all([
-      runYtDlp(['-g', '-f', 'bestaudio/best', searchQuery]),
-      runYtDlp(['--no-playlist', '--print', '%(title)s###%(uploader)s###%(duration)s###%(thumbnail)s', searchQuery]).catch(() => ''),
-    ]);
+    const streamUrl = await runYtDlp(['-g', '-f', 'bestaudio/best', searchQuery]);
+    const metaRaw = await runYtDlp([
+      '--no-playlist',
+      '--print',
+      '%(title)s###%(uploader)s###%(duration)s###%(thumbnail)s',
+      searchQuery,
+    ]).catch(() => '');
 
     const metaParts = metaRaw.split('###');
     const trackTitle = title || metaParts[0] || 'Spotify Track';
@@ -111,7 +131,15 @@ app.get('/stream/pipe', (req: Request, res: Response) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'audio/mpeg');
 
-  const proc = spawn('yt-dlp', ['-o', '-', '-f', 'bestaudio', targetUrl]);
+  const proc = spawn('yt-dlp', [
+    ...BASE_YTDLP_ARGS,
+    '-o',
+    '-',
+    '-f',
+    'bestaudio',
+    targetUrl,
+  ]);
+
   proc.stdout.pipe(res);
   req.on('close', () => proc.kill());
 });
