@@ -176,14 +176,18 @@ export class SpotifyService {
       console.log(`[SpotifyService] 📥 Extracting Spotify audio for room ${roomId}: "${finalTitle}" by ${finalArtist}...`);
       await execFileAsync(binary, args, { maxBuffer: 10 * 1024 * 1024 });
 
-      if (!fs.existsSync(targetFilePath)) {
+      const files = fs.existsSync(roomDir) ? fs.readdirSync(roomDir) : [];
+      const prefix = `${timestamp}_spotify_${trackId}`;
+      const foundFile = files.find((f) => f.startsWith(prefix));
+
+      if (!foundFile) {
         throw new Error('Downloaded Spotify audio file not found on disk.');
       }
 
-      const storageKey = `rooms/${roomId}/${fileName}`;
+      const storageKey = `rooms/${roomId}/${foundFile}`;
       const storageUrl = `/uploads/${storageKey}`;
 
-      console.log(`[SpotifyService] ✅ Spotify audio cached to ${targetFilePath} (${duration}s)`);
+      console.log(`[SpotifyService] ✅ Spotify audio cached to ${storageKey} (${duration}s)`);
 
       return {
         storageKey,
