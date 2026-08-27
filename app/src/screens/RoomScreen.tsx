@@ -127,6 +127,7 @@ export const RoomScreen: React.FC<Props> = ({ room, user, onExit }) => {
     emitSkip,
     emitReorderQueue,
     emitRemoveFromQueue,
+    refreshRoomState,
     isConnected,
     endParty,
   } = useRoomSocket(room, user, handleRoomEnded);
@@ -530,7 +531,10 @@ export const RoomScreen: React.FC<Props> = ({ room, user, onExit }) => {
         visible={uploadModalVisible}
         roomId={room.id}
         onClose={() => setUploadModalVisible(false)}
-        onSuccess={() => console.log('Song uploaded & queued')}
+        onSuccess={() => {
+          refreshRoomState();
+          showToast('Track queued successfully!');
+        }}
         onStartLiveBroadcast={async () => {
           showToast('Live broadcast not available in this version.');
         }}

@@ -57,15 +57,22 @@ export class AudioEngine {
     const base = getApiBaseUrl();
 
     let normalizedUrl = track.url;
-    if (base.startsWith('https://')) {
-      normalizedUrl = normalizedUrl.replace(/^https?:\/\/[^/]+/, base);
-    } else {
+    // Only rewrite localhost/LAN or relative /uploads/ URLs to the current API base
+    if (normalizedUrl.startsWith('/')) {
+      normalizedUrl = `${base}${normalizedUrl}`;
+    } else if (
+      normalizedUrl.includes('localhost:') ||
+      normalizedUrl.includes('127.0.0.1:') ||
+      normalizedUrl.includes('192.168.') ||
+      normalizedUrl.includes('172.')
+    ) {
       normalizedUrl = normalizedUrl
         .replace(/https?:\/\/localhost:\d+/, base)
         .replace(/https?:\/\/127\.0\.0\.1:\d+/, base)
         .replace(/https?:\/\/172\.\d+\.\d+\.\d+:\d+/, base)
         .replace(/https?:\/\/192\.168\.\d+\.\d+:\d+/, base);
     }
+    // External HTTPS CDN streams (p.scdn.co, etc.) are kept as-is!
 
     const normalizedTrack = { ...track, url: normalizedUrl };
     this.currentTrack = normalizedTrack;

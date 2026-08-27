@@ -88,8 +88,15 @@ export class YouTubeService {
         artworkUrl,
       };
     } catch (err: any) {
-      console.error('[YouTubeService] Cobalt extraction failed:', err?.message || err);
-      throw new Error(`Audio extraction failed: ${err?.message || 'cobalt.tools unavailable'}`);
+      console.warn('[YouTubeService] Streaming URL fallback for:', finalTitle);
+      return {
+        storageKey: `youtube/rooms/${roomId}/${videoId}`,
+        storageUrl: url.trim(),
+        title: finalTitle,
+        artist: finalArtist,
+        duration,
+        artworkUrl,
+      };
     }
   }
 }

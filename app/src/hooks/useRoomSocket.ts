@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getAblyChannel, closeAbly } from '../services/AblyService';
-import { getApiBaseUrl } from '../api/client';
+import { getApiBaseUrl, api } from '../api/client';
 import { audioEngine } from '../services/AudioEngine';
 import { useSyncEngine } from './useSyncEngine';
 import { calculateTargetPosition } from '../utils/syncMath';
@@ -12,7 +12,6 @@ import {
   SocketEvents,
   HostStatusPayload,
   RoomEndedPayload,
-  RoomStateSyncPayload,
   SongChangedPayload,
   PlaybackStatus,
 } from '../types';
@@ -40,13 +39,57 @@ export function useRoomSocket(initialRoom: Room, user: UserSession, onRoomEnded:
   useEffect(() => { clockOffsetRef.current = clockOffset; }, [clockOffset]);
 
   // ─────────────────────────────────────────────────────────────────
+  // Helper: Refresh room state from backend API directly
+  // ─────────────────────────────────────────────────────────────────
+  const refreshRoomState = useCallback(async () => {
+    try {
+      const state = await api.getRoomState(initialRoom.id);
+      if (state) {
+        setQueue(state.queue || []);
+        if (state.currentSong) {
+          const prevId = currentSongRef.current?.id;
+          setCurrentSong(state.currentSong);
+          if (state.room?.playbackState) {
+            setPlaybackState(state.room.playbackState);
+          }
+
+          // If track changed, load it
+          if (prevId !== state.currentSong.id) {
+            const isPlaying = state.room?.playbackState === 'playing';
+            const targetPos = calculateTargetPosition({
+              startedAt: state.room?.startedAt ? Number(state.room.startedAt) : null,
+              offsetSeconds: state.room?.offsetSeconds || 0,
+              clockOffset: clockOffsetRef.current,
+              duration: state.currentSong.duration,
+            }).targetPosition;
+
+            audioEngine.loadTrack(
+              {
+                id: state.currentSong.id,
+                url: state.currentSong.storageUrl,
+                title: state.currentSong.title,
+                artist: state.currentSong.artist,
+                duration: state.currentSong.duration,
+              },
+              isPlaying,
+              targetPos
+            ).catch(() => {});
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[RoomSocket] refreshRoomState error:', e);
+    }
+  }, [initialRoom.id]);
+
+  // ─────────────────────────────────────────────────────────────────
   // Initialize Ably subscription + seed state from join response
   // ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     const roomCode = initialRoom.code;
     const channel = getAblyChannel(roomCode);
 
-    // Apply initial room state passed from the join response
+    // 1. Apply initial room state passed from the join response
     const seed = (initialRoom as any)._seedState;
     if (seed) {
       setQueue(seed.queue ?? []);
@@ -73,21 +116,25 @@ export function useRoomSocket(initialRoom: Room, user: UserSession, onRoomEnded:
           targetPos
         ).catch(() => {});
       }
+    } else {
+      // If no seed state, fetch immediately
+      refreshRoomState().catch(() => {});
     }
 
     // Perform initial clock sync via HTTP
     performClockSync(null as any).catch(() => {});
 
-    // Subscribe to Ably channel events
+    // 2. Subscribe to Ably channel events
     channel.subscribe(SocketEvents.QUEUE_UPDATED, (msg) => {
       const payload = msg.data as { queue: QueueItem[] };
-      console.log(`[Ably] QUEUE_UPDATED: ${payload.queue.length} songs`);
-      setQueue(payload.queue);
+      console.log(`[Ably] QUEUE_UPDATED: ${payload?.queue?.length} songs`);
+      if (payload?.queue) setQueue(payload.queue);
     });
 
     channel.subscribe(SocketEvents.SONG_CHANGED, async (msg) => {
       const payload = msg.data as SongChangedPayload;
-      console.log(`[Ably] SONG_CHANGED: ${payload.currentSong?.title ?? 'None'}`);
+      console.log(`[Ably] SONG_CHANGED: ${payload?.currentSong?.title ?? 'None'}`);
+      if (!payload) return;
       setCurrentSong(payload.currentSong);
       setPlaybackState(payload.playbackState as PlaybackStatus);
 
@@ -118,6 +165,7 @@ export function useRoomSocket(initialRoom: Room, user: UserSession, onRoomEnded:
 
     channel.subscribe(SocketEvents.PLAY, async (msg) => {
       const payload = msg.data;
+      if (!payload) return;
       console.log('[Ably] PLAY event received');
       setPlaybackState('playing');
 
@@ -129,11 +177,7 @@ export function useRoomSocket(initialRoom: Room, user: UserSession, onRoomEnded:
       }).targetPosition;
 
       const current = audioEngine.getCurrentTrack();
-      if (current && current.id !== payload.songId) {
-        // Different song — skip
-      } else if (!current) {
-        // No track loaded
-      } else {
+      if (current && current.id === payload.songId) {
         const pos = await audioEngine.getPosition();
         if (Math.abs(pos - targetPos) > 0.1) {
           await audioEngine.seekTo(targetPos);
@@ -144,14 +188,16 @@ export function useRoomSocket(initialRoom: Room, user: UserSession, onRoomEnded:
 
     channel.subscribe(SocketEvents.PAUSE, async (msg) => {
       const payload = msg.data;
+      if (!payload) return;
       console.log('[Ably] PAUSE event received');
       setPlaybackState('paused');
-      await audioEngine.seekTo(payload.offsetSeconds);
+      await audioEngine.seekTo(payload.offsetSeconds || 0);
       await audioEngine.pause();
     });
 
     channel.subscribe(SocketEvents.SEEK, async (msg) => {
       const payload = msg.data;
+      if (!payload) return;
       console.log('[Ably] SEEK event received to', payload.offsetSeconds);
       if (payload.playbackState) setPlaybackState(payload.playbackState as PlaybackStatus);
 
@@ -166,38 +212,8 @@ export function useRoomSocket(initialRoom: Room, user: UserSession, onRoomEnded:
         await audioEngine.seekTo(targetPos);
         await audioEngine.play();
       } else {
-        await audioEngine.seekTo(payload.offsetSeconds);
+        await audioEngine.seekTo(payload.offsetSeconds || 0);
         await audioEngine.pause();
-      }
-    });
-
-    channel.subscribe(SocketEvents.SYNC_PULSE, async (msg) => {
-      const payload = msg.data;
-      if (payload.playbackState !== 'playing' || !payload.startedAt) {
-        await audioEngine.setRate(1.0);
-        return;
-      }
-
-      const { targetPosition: expected } = calculateTargetPosition({
-        startedAt: payload.startedAt,
-        offsetSeconds: payload.offsetSeconds,
-        clockOffset: clockOffsetRef.current,
-        duration: currentSongRef.current?.duration,
-      });
-
-      const actual = await audioEngine.getPosition();
-      const diffMs = (expected - actual) * 1000;
-      const absDiff = Math.abs(diffMs);
-
-      if (absDiff > 350) {
-        await audioEngine.seekTo(expected);
-        await audioEngine.setRate(1.0);
-      } else if (absDiff > 120) {
-        await audioEngine.setRate(diffMs > 0 ? 1.025 : 0.975);
-      } else if (absDiff > 25) {
-        await audioEngine.setRate(diffMs > 0 ? 1.012 : 0.988);
-      } else {
-        await audioEngine.setRate(1.0);
       }
     });
 
@@ -206,18 +222,23 @@ export function useRoomSocket(initialRoom: Room, user: UserSession, onRoomEnded:
     });
 
     channel.subscribe(SocketEvents.HOST_STATUS, (msg) => {
-      setHostStatus(msg.data as HostStatusPayload);
+      if (msg.data) setHostStatus(msg.data as HostStatusPayload);
     });
 
     channel.subscribe(SocketEvents.ROOM_ENDED, async (msg) => {
       const payload = msg.data as RoomEndedPayload;
-      console.log(`[Ably] ROOM_ENDED: ${payload.reason}`);
+      console.log(`[Ably] ROOM_ENDED: ${payload?.reason}`);
       await audioEngine.unload();
-      onRoomEnded(payload.reason);
+      onRoomEnded(payload?.reason || 'ended');
     });
 
     // Track Ably connection state
     channel.attach().then(() => setIsConnected(true)).catch(() => {});
+
+    // Heartbeat sync loop: refresh state every 5s
+    const stateSyncInterval = setInterval(() => {
+      refreshRoomState().catch(() => {});
+    }, 5000);
 
     // Notify when track ends — call REST endpoint
     audioEngine.setOnTrackEnded(() => {
@@ -235,9 +256,10 @@ export function useRoomSocket(initialRoom: Room, user: UserSession, onRoomEnded:
     return () => {
       channel.unsubscribe();
       channel.detach().catch(() => {});
+      clearInterval(stateSyncInterval);
       audioEngine.unload();
     };
-  }, [initialRoom.code, initialRoom.id, onRoomEnded, performClockSync]);
+  }, [initialRoom.code, initialRoom.id, onRoomEnded, performClockSync, refreshRoomState]);
 
   // ─────────────────────────────────────────────────────────────────
   // Host action handlers — all call REST endpoints, Ably broadcasts
@@ -309,7 +331,7 @@ export function useRoomSocket(initialRoom: Room, user: UserSession, onRoomEnded:
   }, [user.isHost, callPlayback]);
 
   return {
-    socket: null, // Kept for type compat — no longer Socket.io
+    socket: null,
     isConnected,
     currentSong,
     queue,
@@ -322,6 +344,7 @@ export function useRoomSocket(initialRoom: Room, user: UserSession, onRoomEnded:
     driftReport,
     isLiveStreaming,
     setIsLiveStreaming: () => {},
+    refreshRoomState,
     emitPlay,
     emitPause,
     emitSeek,
