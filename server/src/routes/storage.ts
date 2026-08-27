@@ -88,9 +88,11 @@ const handlePresignedUrl = async (req: Request, res: Response) => {
   }
 };
 
-// Support both /upload-url and /rooms/:id/presigned-url
+// Support all URL variants: /upload-url, /presigned-url, /rooms/:id/presigned-url, /rooms/:id/upload-url
 storageRouter.post('/upload-url', handlePresignedUrl);
+storageRouter.post('/presigned-url', handlePresignedUrl);
 storageRouter.post('/rooms/:id/presigned-url', handlePresignedUrl);
+storageRouter.post('/rooms/:id/upload-url', handlePresignedUrl);
 
 // Local dev direct upload handler (accepts raw binary body or stream)
 storageRouter.put(
