@@ -53,9 +53,9 @@ roomsRouter.post('/', async (req: Request, res: Response) => {
     };
 
     return res.status(201).json(responseData);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error creating room:', error);
-    return res.status(500).json({ error: 'Failed to create room' });
+    return res.status(500).json({ error: 'Failed to create room', details: error?.message || String(error) });
   }
 });
 

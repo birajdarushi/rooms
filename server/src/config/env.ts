@@ -15,6 +15,6 @@ export const config = {
     bucket: process.env.AWS_S3_BUCKET || 'room-audio-bucket',
     endpoint: process.env.AWS_S3_ENDPOINT,
     publicUrl: process.env.PUBLIC_STORAGE_URL,
-    localUploadDir: path.resolve(__dirname, '../../uploads'),
+    localUploadDir: process.env.VERCEL ? path.resolve('/tmp/uploads') : path.resolve(__dirname, '../../uploads'),
   },
 };

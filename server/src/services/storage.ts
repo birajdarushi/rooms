@@ -27,9 +27,11 @@ export class StorageService {
     }
 
     // Ensure local directory structure exists
-    if (!fs.existsSync(config.storage.localUploadDir)) {
-      fs.mkdirSync(config.storage.localUploadDir, { recursive: true });
-    }
+    try {
+      if (!fs.existsSync(config.storage.localUploadDir)) {
+        fs.mkdirSync(config.storage.localUploadDir, { recursive: true });
+      }
+    } catch (_) {}
   }
 
   async getPresignedUploadUrl(
@@ -65,9 +67,11 @@ export class StorageService {
 
     // Local dev mode fallback
     const roomUploadDir = path.join(config.storage.localUploadDir, 'rooms', roomId);
-    if (!fs.existsSync(roomUploadDir)) {
-      fs.mkdirSync(roomUploadDir, { recursive: true });
-    }
+    try {
+      if (!fs.existsSync(roomUploadDir)) {
+        fs.mkdirSync(roomUploadDir, { recursive: true });
+      }
+    } catch (_) {}
 
     const uploadUrl = `${baseUrl}/api/storage/local-upload?key=${encodeURIComponent(storageKey)}`;
     const publicUrl = `${baseUrl}/uploads/${storageKey}`;
