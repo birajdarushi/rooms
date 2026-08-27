@@ -52,12 +52,12 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', time: Date.now(), service: 'Room Synced Backend' });
 });
 
-// REST API routes
-app.use('/api/rooms', roomsRouter);
-app.use('/api/storage', storageRouter);
-app.use('/api/youtube', youtubeRouter);
-app.use('/api/spotify', spotifyRouter);
-app.use('/api/stream', streamRouter);
+// REST API routes (supports both /api/* and direct /* routing on Vercel serverless)
+app.use(['/api/rooms', '/rooms'], roomsRouter);
+app.use(['/api/storage', '/storage'], storageRouter);
+app.use(['/api/youtube', '/youtube'], youtubeRouter);
+app.use(['/api/spotify', '/spotify'], spotifyRouter);
+app.use(['/api/stream', '/stream'], streamRouter);
 
 // Global Express error handler
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
