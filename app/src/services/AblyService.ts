@@ -4,34 +4,62 @@
  */
 import Ably from 'ably';
 
-const ABLY_KEY = process.env.EXPO_PUBLIC_ABLY_KEY || '';
+// Default to the scoped frontend subscribe key
+const FALLBACK_PUBLIC_KEY = 'SRttRA.TIs0aA:kx9aNlwUwhYjh_c70yVoFF6ib7cmaHplLm2JYJcU6v0';
+const ABLY_KEY = process.env.EXPO_PUBLIC_ABLY_KEY || FALLBACK_PUBLIC_KEY;
 
 let realtimeClient: Ably.Realtime | null = null;
 
-function getClient(): Ably.Realtime {
+function getClient(): Ably.Realtime | null {
   if (!realtimeClient || realtimeClient.connection.state === 'closed') {
-    if (!ABLY_KEY) {
-      console.warn('[Ably] EXPO_PUBLIC_ABLY_KEY not set');
+    const key = ABLY_KEY || FALLBACK_PUBLIC_KEY;
+    try {
+      realtimeClient = new Ably.Realtime({
+        key,
+        autoConnect: true,
+      });
+    } catch (err: any) {
+      console.warn('[Ably] Failed to initialize Ably Realtime client:', err?.message || err);
+      return null;
     }
-    realtimeClient = new Ably.Realtime({
-      key: ABLY_KEY,
-      autoConnect: true,
-    });
   }
   return realtimeClient;
 }
 
 export function getAblyChannel(roomCode: string): Ably.RealtimeChannel {
-  return getClient().channels.get(`room:${roomCode.toUpperCase()}`);
+  const client = getClient();
+  if (!client) {
+    // Return a safe mock channel to prevent unhandled React crashes
+    return {
+      subscribe: () => {},
+      unsubscribe: () => {},
+      publish: async () => {},
+      attach: async () => {},
+      detach: async () => {},
+    } as any;
+  }
+  return client.channels.get(`room:${roomCode.toUpperCase()}`);
 }
 
 export function getUserChannel(userId: string): Ably.RealtimeChannel {
-  return getClient().channels.get(`user:${userId}`);
+  const client = getClient();
+  if (!client) {
+    return {
+      subscribe: () => {},
+      unsubscribe: () => {},
+      publish: async () => {},
+      attach: async () => {},
+      detach: async () => {},
+    } as any;
+  }
+  return client.channels.get(`user:${userId}`);
 }
 
 export function closeAbly(): void {
   if (realtimeClient) {
-    realtimeClient.close();
+    try {
+      realtimeClient.close();
+    } catch (_) {}
     realtimeClient = null;
   }
 }

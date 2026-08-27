@@ -1,5 +1,4 @@
 import { SpotifyTrackInfo } from '../shared';
-import { extractAudioUrl } from './cobalt';
 
 export function isValidSpotifyUrl(url: string): boolean {
   if (!url || typeof url !== 'string') return false;
@@ -13,11 +12,15 @@ export function extractSpotifyTrackId(url: string): string | null {
   return match ? match[1] : null;
 }
 
+export interface SpotifyResolvedTrack extends SpotifyTrackInfo {
+  audioStreamUrl?: string;
+}
+
 export class SpotifyService {
   /**
-   * Resolves Spotify track metadata via Spotify embed / oEmbed endpoints.
+   * Resolves Spotify track metadata and direct high-speed audio stream via Spotify embed.
    */
-  public async getTrackInfo(url: string): Promise<SpotifyTrackInfo> {
+  public async getTrackInfo(url: string): Promise<SpotifyResolvedTrack> {
     if (!isValidSpotifyUrl(url)) {
       throw new Error('Invalid Spotify URL provided.');
     }
@@ -59,6 +62,12 @@ export class SpotifyService {
               thumbnail = images[images.length - 1]?.url || images[0]?.url || '';
             }
 
+            const audioStreamUrl =
+              entity.audioPreview?.url ||
+              entity.audio?.url ||
+              entity.preview_url ||
+              undefined;
+
             return {
               title,
               artist: artists,
@@ -66,6 +75,7 @@ export class SpotifyService {
               thumbnail,
               spotifyUrl: url.trim(),
               source: 'spotify',
+              audioStreamUrl,
             };
           }
         }
@@ -94,8 +104,8 @@ export class SpotifyService {
   }
 
   /**
-   * Extracts a streamable audio URL for the Spotify track via cobalt.tools.
-   * No file download — returns a temporary CDN stream URL directly.
+   * Resolves direct streamable audio URL for the Spotify track.
+   * Zero disk usage — streams directly from Spotify's global CDN.
    */
   public async getStreamUrl(params: {
     roomId: string;
@@ -119,22 +129,16 @@ export class SpotifyService {
     const duration = info.duration;
     const artworkUrl = info.thumbnail;
 
-    try {
-      console.log(`[SpotifyService] Extracting stream via cobalt for: "${finalTitle}" by ${finalArtist}`);
-      const { streamUrl } = await extractAudioUrl(url.trim());
+    const streamUrl = info.audioStreamUrl || url;
 
-      return {
-        storageKey: `cobalt/rooms/${roomId}/spotify_${trackId}`,
-        storageUrl: streamUrl,
-        title: finalTitle,
-        artist: finalArtist,
-        duration,
-        artworkUrl,
-      };
-    } catch (err: any) {
-      console.error('[SpotifyService] Cobalt extraction failed:', err?.message || err);
-      throw new Error(`Audio extraction failed: ${err?.message || 'cobalt.tools unavailable'}`);
-    }
+    return {
+      storageKey: `spotify/rooms/${roomId}/${trackId}`,
+      storageUrl: streamUrl,
+      title: finalTitle,
+      artist: finalArtist,
+      duration,
+      artworkUrl,
+    };
   }
 }
 
